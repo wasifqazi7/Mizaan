@@ -1,0 +1,2 @@
+# Mizaan
+Zakat Simplifier App
