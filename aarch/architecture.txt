@@ -1,0 +1,352 @@
+================================================================================
+                      ARCHITECTURE DOCUMENT
+        Zakat Calculation & Charity Recommendation App
+================================================================================
+
+1. MICROSERVICE VS MONOLITH DECISION
+================================================================================
+
+DECISION: Modular Monolith
+
+Justification:
+- The application has 4 domains (Auth, Zakat, Charity, Hadith) with low 
+  complexity and tight coupling (e.g., Zakat depends on Auth for user context).
+- Team size assumption: 1-3 developers. A monolith reduces operational overhead.
+- Deployment target: single Docker container or VM. No Kubernetes needed initially.
+- The codebase is organized into packages that mirror service boundaries,
+  making future extraction into microservices straightforward if needed.
+
+Trade-offs Accepted:
+- Single deployment unit (all-or-nothing deploys) — acceptable at this scale.
+- Shared database — acceptable since domains have clear table ownership.
+- If hadith content grows to millions of entries, extract HadithService first.
+
+
+2. FOLDER STRUCTURE
+================================================================================
+
+A. Backend (Kotlin / Spring Boot)
+────────────────────────────────────────────────────────────────────────────────
+
+zakat-backend/
+├── build.gradle.kts
+├── settings.gradle.kts
+├── docker-compose.yml
+├── Dockerfile
+├── src/
+│   ├── main/
+│   │   ├── kotlin/
+│   │   │   └── com/zakatapp/
+│   │   │       ├── ZakatApplication.kt                 # Main entry point
+│   │   │       │
+│   │   │       ├── config/                             # Configuration
+│   │   │       │   ├── SecurityConfig.kt               # Spring Security + JWT filter
+│   │   │       │   ├── JwtConfig.kt                    # JWT properties
+│   │   │       │   ├── CorsConfig.kt                   # CORS settings
+│   │   │       │   └── DataSeeder.kt                   # Seed charities & hadiths
+│   │   │       │
+│   │   │       ├── auth/                               # Auth domain
+│   │   │       │   ├── controller/
+│   │   │       │   │   └── AuthController.kt
+│   │   │       │   ├── service/
+│   │   │       │   │   ├── AuthService.kt
+│   │   │       │   │   └── JwtService.kt
+│   │   │       │   ├── dto/
+│   │   │       │   │   ├── RegisterRequest.kt
+│   │   │       │   │   ├── LoginRequest.kt
+│   │   │       │   │   ├── AuthResponse.kt
+│   │   │       │   │   └── UserProfileResponse.kt
+│   │   │       │   ├── entity/
+│   │   │       │   │   └── User.kt
+│   │   │       │   ├── repository/
+│   │   │       │   │   └── UserRepository.kt
+│   │   │       │   └── security/
+│   │   │       │       ├── JwtAuthFilter.kt
+│   │   │       │       └── UserDetailsServiceImpl.kt
+│   │   │       │
+│   │   │       ├── zakat/                              # Zakat domain
+│   │   │       │   ├── controller/
+│   │   │       │   │   └── ZakatController.kt
+│   │   │       │   ├── service/
+│   │   │       │   │   └── ZakatService.kt
+│   │   │       │   ├── dto/
+│   │   │       │   │   ├── ZakatCalculationRequest.kt
+│   │   │       │   │   ├── ZakatCalculationResponse.kt
+│   │   │       │   │   ├── ZakatSaveRequest.kt
+│   │   │       │   │   ├── ZakatRecordResponse.kt
+│   │   │       │   │   └── ZakatSummaryResponse.kt
+│   │   │       │   ├── entity/
+│   │   │       │   │   └── ZakatRecord.kt
+│   │   │       │   └── repository/
+│   │   │       │       └── ZakatRecordRepository.kt
+│   │   │       │
+│   │   │       ├── charity/                            # Charity domain
+│   │   │       │   ├── controller/
+│   │   │       │   │   └── CharityController.kt
+│   │   │       │   ├── service/
+│   │   │       │   │   └── CharityService.kt
+│   │   │       │   ├── dto/
+│   │   │       │   │   └── CharityResponse.kt
+│   │   │       │   ├── entity/
+│   │   │       │   │   └── Charity.kt
+│   │   │       │   └── repository/
+│   │   │       │       └── CharityRepository.kt
+│   │   │       │
+│   │   │       ├── hadith/                             # Hadith domain
+│   │   │       │   ├── controller/
+│   │   │       │   │   └── HadithController.kt
+│   │   │       │   ├── service/
+│   │   │       │   │   └── HadithService.kt
+│   │   │       │   ├── dto/
+│   │   │       │   │   └── HadithResponse.kt
+│   │   │       │   ├── entity/
+│   │   │       │   │   └── Hadith.kt
+│   │   │       │   └── repository/
+│   │   │       │       └── HadithRepository.kt
+│   │   │       │
+│   │   │       └── common/                             # Shared utilities
+│   │   │           ├── exception/
+│   │   │           │   ├── GlobalExceptionHandler.kt
+│   │   │           │   ├── ResourceNotFoundException.kt
+│   │   │           │   └── BadRequestException.kt
+│   │   │           └── dto/
+│   │   │               └── ApiError.kt
+│   │   │
+│   │   └── resources/
+│   │       ├── application.yml                         # Main config
+│   │       ├── application-dev.yml                     # Dev profile
+│   │       ├── application-prod.yml                    # Prod profile
+│   │       └── db/migration/                           # Flyway migrations
+│   │           ├── V1__create_users_table.sql
+│   │           ├── V2__create_zakat_records_table.sql
+│   │           ├── V3__create_charities_table.sql
+│   │           ├── V4__create_hadiths_table.sql
+│   │           └── V5__seed_charities_and_hadiths.sql
+│   │
+│   └── test/
+│       └── kotlin/
+│           └── com/zakatapp/
+│               ├── auth/
+│               │   ├── AuthControllerTest.kt
+│               │   └── AuthServiceTest.kt
+│               ├── zakat/
+│               │   ├── ZakatControllerTest.kt
+│               │   └── ZakatServiceTest.kt
+│               └── ...
+
+
+B. Frontend (React Native)
+────────────────────────────────────────────────────────────────────────────────
+
+zakat-frontend/
+├── package.json
+├── app.json
+├── babel.config.js
+├── tsconfig.json
+├── App.tsx                                 # Root component + navigation
+├── src/
+│   ├── navigation/
+│   │   ├── AppNavigator.tsx                # Main navigation container
+│   │   ├── AuthStack.tsx                   # Login/Register stack
+│   │   └── MainTabs.tsx                    # Bottom tab navigator
+│   │
+│   ├── screens/
+│   │   ├── auth/
+│   │   │   ├── LoginScreen.tsx
+│   │   │   └── RegisterScreen.tsx
+│   │   ├── dashboard/
+│   │   │   └── DashboardScreen.tsx
+│   │   ├── zakat/
+│   │   │   ├── ZakatCalculatorScreen.tsx
+│   │   │   └── ZakatHistoryScreen.tsx
+│   │   └── charity/
+│   │       └── CharityListScreen.tsx
+│   │
+│   ├── components/
+│   │   ├── common/
+│   │   │   ├── Button.tsx
+│   │   │   ├── Input.tsx
+│   │   │   ├── Card.tsx
+│   │   │   ├── LoadingSpinner.tsx
+│   │   │   └── Header.tsx
+│   │   ├── dashboard/
+│   │   │   ├── ZakatSummaryCard.tsx
+│   │   │   ├── HadithBanner.tsx
+│   │   │   ├── QuickActions.tsx
+│   │   │   └── CharitySpotlight.tsx
+│   │   ├── zakat/
+│   │   │   ├── AssetInputForm.tsx
+│   │   │   ├── NisabIndicator.tsx
+│   │   │   └── CalculationResult.tsx
+│   │   └── charity/
+│   │       └── CharityCard.tsx
+│   │
+│   ├── context/
+│   │   ├── AuthContext.tsx                 # Auth state + login/logout
+│   │   ├── ZakatContext.tsx                # Zakat data state
+│   │   └── AppProvider.tsx                 # Combined provider wrapper
+│   │
+│   ├── services/
+│   │   ├── api.ts                          # Axios instance + interceptors
+│   │   ├── authService.ts                  # Auth API calls
+│   │   ├── zakatService.ts                 # Zakat API calls
+│   │   ├── charityService.ts               # Charity API calls
+│   │   └── hadithService.ts                # Hadith API calls
+│   │
+│   ├── hooks/
+│   │   ├── useAuth.ts
+│   │   ├── useZakat.ts
+│   │   └── useHadith.ts
+│   │
+│   ├── utils/
+│   │   ├── formatCurrency.ts
+│   │   ├── validators.ts
+│   │   └── storage.ts                      # AsyncStorage wrapper
+│   │
+│   ├── constants/
+│   │   ├── colors.ts                       # Theme colors
+│   │   ├── typography.ts                   # Font styles
+│   │   └── api.ts                          # API base URL, endpoints
+│   │
+│   └── types/
+│       ├── auth.ts
+│       ├── zakat.ts
+│       ├── charity.ts
+│       └── hadith.ts
+
+
+3. API STRUCTURE
+================================================================================
+
+Base URL: /api/v1
+
+Auth Endpoints (Public):
+  POST   /api/v1/auth/register
+  POST   /api/v1/auth/login
+  POST   /api/v1/auth/refresh
+
+Zakat Endpoints (Authenticated):
+  POST   /api/v1/zakat/calculate          # Calculate without saving
+  POST   /api/v1/zakat/save               # Save a zakat record
+  GET    /api/v1/zakat/history             # Get all records for user
+  GET    /api/v1/zakat/summary             # Get current year summary
+  DELETE /api/v1/zakat/{id}               # Delete a record
+
+Charity Endpoints (Authenticated):
+  GET    /api/v1/charities                 # List all charities (paginated)
+  GET    /api/v1/charities/{id}           # Get charity details
+  GET    /api/v1/charities/featured       # Get featured charities
+
+Hadith Endpoints (Authenticated):
+  GET    /api/v1/hadiths/random            # Get a random hadith
+  GET    /api/v1/hadiths?tag=zakat         # Get hadiths by tag
+  GET    /api/v1/hadiths/{id}             # Get specific hadith
+
+User Endpoints (Authenticated):
+  GET    /api/v1/users/profile             # Get current user profile
+  PUT    /api/v1/users/profile             # Update profile
+
+
+4. AUTHENTICATION FLOW (JWT LIFECYCLE)
+================================================================================
+
+A. Registration Flow
+────────────────────
+1. Client sends POST /api/v1/auth/register with {name, email, password}
+2. Server validates input (email format, password strength)
+3. Server checks if email already exists → 409 Conflict if yes
+4. Server hashes password with BCrypt (strength 12)
+5. Server creates User entity and persists to DB
+6. Server generates JWT access token (15 min) + refresh token (7 days)
+7. Server returns { accessToken, refreshToken, user: {id, name, email} }
+
+B. Login Flow
+────────────────────
+1. Client sends POST /api/v1/auth/login with {email, password}
+2. Server loads user by email → 401 if not found
+3. Server verifies password with BCrypt → 401 if mismatch
+4. Server generates JWT access token + refresh token
+5. Server returns { accessToken, refreshToken, user: {id, name, email} }
+
+C. Authenticated Request Flow
+────────────────────
+1. Client includes header: Authorization: Bearer <accessToken>
+2. JwtAuthFilter intercepts request
+3. Filter extracts token, validates signature + expiry
+4. Filter loads UserDetails from token subject (user ID)
+5. Filter sets SecurityContext with authenticated principal
+6. Request proceeds to controller
+7. If token expired → 401 Unauthorized
+
+D. Token Refresh Flow
+────────────────────
+1. Client detects 401 response (access token expired)
+2. Client sends POST /api/v1/auth/refresh with { refreshToken }
+3. Server validates refresh token signature + expiry
+4. Server generates new access token (15 min)
+5. Server returns { accessToken } (same refresh token reused until expiry)
+6. Client retries original request with new access token
+
+E. JWT Token Structure
+────────────────────
+Header:  { "alg": "HS256", "typ": "JWT" }
+Payload: {
+  "sub": "user-uuid",          // User ID
+  "email": "user@example.com",
+  "iat": 1700000000,           // Issued at
+  "exp": 1700000900            // Expires (15 min for access, 7 days for refresh)
+}
+Signature: HMAC-SHA256(header + payload, secret_key)
+
+F. Token Storage (Client)
+────────────────────
+- Access token: stored in memory (Context state) for fast access
+- Refresh token: stored in AsyncStorage (encrypted on iOS via Keychain)
+- On app start: check for refresh token → auto-login if valid
+
+
+5. DATABASE SCHEMA OVERVIEW
+================================================================================
+
+┌────────────┐         ┌─────────────────┐
+│   users    │────────<│  zakat_records   │
+│            │  1:N    │                  │
+│  id (PK)   │         │  id (PK)         │
+│  name      │         │  user_id (FK)    │
+│  email     │         │  year            │
+│  password  │         │  savings         │
+│  created_at│         │  gold_value      │
+│            │         │  silver_value    │
+└────────────┘         │  investments     │
+                       │  debts           │
+                       │  total_assets    │
+                       │  zakat_amount    │
+                       │  is_paid         │
+                       │  paid_at         │
+                       │  created_at      │
+                       └─────────────────┘
+
+┌────────────────┐     ┌────────────────┐
+│   charities    │     │    hadiths     │
+│                │     │                │
+│  id (PK)       │     │  id (PK)       │
+│  name          │     │  text_arabic   │
+│  description   │     │  text_english  │
+│  website       │     │  source        │
+│  logo_url      │     │  narrator      │
+│  category      │     │  tags          │
+│  location      │     │  created_at    │
+│  credibility   │     └────────────────┘
+│  is_featured   │
+│  created_at    │
+└────────────────┘
+
+Relationships:
+- users → zakat_records: One-to-Many (a user has many zakat records)
+- charities: standalone (no FK relationships, admin-managed)
+- hadiths: standalone (no FK relationships, seeded data)
+
+
+================================================================================
+                        END OF ARCHITECTURE DOCUMENT
+================================================================================

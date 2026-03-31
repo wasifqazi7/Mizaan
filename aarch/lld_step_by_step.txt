@@ -1,0 +1,977 @@
+================================================================================
+              STEP-BY-STEP IMPLEMENTATION PLAN
+        Zakat Calculation & Charity Recommendation App
+================================================================================
+
+This guide walks a developer through building the entire application from
+scratch, phase by phase. Each step specifies what to build, which files to
+create, dependencies required, and the expected output at the end.
+
+Assumptions:
+- Developer has JDK 17+, Node.js 18+, PostgreSQL 15+ installed
+- IDE: IntelliJ IDEA (backend), VS Code (frontend)
+- Git initialized from the start
+
+
+================================================================================
+PHASE 1: PROJECT SETUP
+================================================================================
+Estimated Time: 1-2 hours
+
+STEP 1.1: Initialize Backend Project
+────────────────────────────────────────────────────────────────────────────────
+What to build:
+  Spring Boot project with Kotlin, Gradle, and all required dependencies.
+
+How:
+  1. Go to https://start.spring.io
+  2. Select:
+     - Language: Kotlin
+     - Build: Gradle (Kotlin DSL)
+     - Spring Boot: 3.2.x (latest stable)
+     - Group: com.zakatapp
+     - Artifact: zakat-backend
+     - Java: 17
+  3. Add dependencies:
+     - Spring Web
+     - Spring Data JPA
+     - Spring Security
+     - PostgreSQL Driver
+     - Flyway Migration
+     - Validation (Bean Validation)
+  4. Download and extract
+
+Files to create/modify:
+  build.gradle.kts — add these additional dependencies:
+    implementation("io.jsonwebtoken:jjwt-api:0.12.5")
+    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.5")
+    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.5")
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+
+  application.yml:
+    spring:
+      datasource:
+        url: jdbc:postgresql://localhost:5432/zakatdb
+        username: postgres
+        password: postgres
+      jpa:
+        hibernate:
+          ddl-auto: validate
+        show-sql: true
+        properties:
+          hibernate:
+            dialect: org.hibernate.dialect.PostgreSQLDialect
+      flyway:
+        enabled: true
+        locations: classpath:db/migration
+    
+    jwt:
+      secret: your-256-bit-secret-key-here-min-32-chars-long
+      access-token-expiry: 900000       # 15 minutes in ms
+      refresh-token-expiry: 604800000   # 7 days in ms
+
+  docker-compose.yml:
+    version: '3.8'
+    services:
+      postgres:
+        image: postgres:15-alpine
+        ports:
+          - "5432:5432"
+        environment:
+          POSTGRES_DB: zakatdb
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        volumes:
+          - pgdata:/var/lib/postgresql/data
+    volumes:
+      pgdata:
+
+Expected output:
+  - Running `docker-compose up -d` starts PostgreSQL
+  - Running `./gradlew bootRun` starts the app (will fail on missing tables,
+    which is expected — Flyway migrations come in Step 1.2)
+
+
+STEP 1.2: Create Database Migrations
+────────────────────────────────────────────────────────────────────────────────
+What to build:
+  Flyway SQL migration files for all 4 tables + seed data.
+
+Files to create:
+  src/main/resources/db/migration/
+  ├── V1__create_users_table.sql
+  ├── V2__create_zakat_records_table.sql
+  ├── V3__create_charities_table.sql
+  ├── V4__create_hadiths_table.sql
+  └── V5__seed_charities_and_hadiths.sql
+
+  Copy the CREATE TABLE statements from database_schema.txt into V1-V4.
+  Copy the INSERT statements from database_schema.txt into V5.
+
+Expected output:
+  - Running `./gradlew bootRun` now succeeds
+  - All 4 tables created in PostgreSQL
+  - 5 charities and 5 hadiths seeded
+  - Verify with: psql -d zakatdb -c "\dt" shows all tables
+
+
+STEP 1.3: Create Package Structure
+────────────────────────────────────────────────────────────────────────────────
+What to build:
+  Empty package structure following domain-driven layout.
+
+Directories to create:
+  src/main/kotlin/com/zakatapp/
+  ├── config/
+  ├── auth/
+  │   ├── controller/
+  │   ├── service/
+  │   ├── dto/
+  │   ├── entity/
+  │   ├── repository/
+  │   └── security/
+  ├── zakat/
+  │   ├── controller/
+  │   ├── service/
+  │   ├── dto/
+  │   ├── entity/
+  │   └── repository/
+  ├── charity/
+  │   ├── controller/
+  │   ├── service/
+  │   ├── dto/
+  │   ├── entity/
+  │   └── repository/
+  ├── hadith/
+  │   ├── controller/
+  │   ├── service/
+  │   ├── dto/
+  │   ├── entity/
+  │   └── repository/
+  └── common/
+      ├── exception/
+      └── dto/
+
+Expected output:
+  - Clean folder structure visible in IDE
+  - No compilation errors
+
+
+STEP 1.4: Initialize Frontend Project
+────────────────────────────────────────────────────────────────────────────────
+What to build:
+  React Native project with TypeScript and navigation.
+
+How:
+  npx react-native@latest init ZakatFrontend --template react-native-template-typescript
+
+  # Or with Expo (simpler setup):
+  npx create-expo-app ZakatFrontend --template blank-typescript
+
+Install dependencies:
+  npm install @react-navigation/native @react-navigation/stack
+  npm install @react-navigation/bottom-tabs
+  npm install react-native-screens react-native-safe-area-context
+  npm install axios
+  npm install @react-native-async-storage/async-storage
+  npm install react-native-vector-icons
+  npm install styled-components
+  npm install --save-dev @types/styled-components-react-native
+
+Files to create:
+  src/
+  ├── navigation/
+  ├── screens/
+  ├── components/
+  ├── context/
+  ├── services/
+  ├── hooks/
+  ├── utils/
+  ├── constants/
+  └── types/
+
+  src/constants/colors.ts:
+    export const Colors = {
+      primary: '#1B5E20',       // Deep Islamic green
+      primaryLight: '#4CAF50',
+      secondary: '#BF9B30',     // Gold accent
+      background: '#FAFAFA',
+      surface: '#FFFFFF',
+      text: '#212121',
+      textSecondary: '#757575',
+      error: '#D32F2F',
+      border: '#E0E0E0',
+      hadithBg: '#F1F8E9',      // Light green for hadith cards
+    };
+
+  src/constants/api.ts:
+    export const API_BASE_URL = 'http://10.0.2.2:8080/api/v1'; // Android emulator
+    // For iOS simulator use: http://localhost:8080/api/v1
+
+Expected output:
+  - `npm start` or `npx expo start` launches the metro bundler
+  - App loads with default screen on emulator/device
+
+
+================================================================================
+PHASE 2: AUTHENTICATION IMPLEMENTATION
+================================================================================
+Estimated Time: 4-6 hours
+
+STEP 2.1: Backend — User Entity and Repository
+────────────────────────────────────────────────────────────────────────────────
+What to build:
+  JPA entity for users table and Spring Data repository.
+
+Files to create:
+  auth/entity/User.kt
+    - @Entity, @Table(name = "users")
+    - Fields: id (UUID), name, email, passwordHash, createdAt, updatedAt
+    - Use @Column annotations matching DB schema
+
+  auth/repository/UserRepository.kt
+    - interface extending JpaRepository<User, UUID>
+    - fun findByEmail(email: String): User?
+    - fun existsByEmail(email: String): Boolean
+
+Expected output:
+  - App starts without errors
+  - JPA validates entity against DB schema successfully
+
+
+STEP 2.2: Backend — JWT Service
+────────────────────────────────────────────────────────────────────────────────
+What to build:
+  Service for creating and validating JWT tokens.
+
+Files to create:
+  config/JwtConfig.kt
+    - @ConfigurationProperties(prefix = "jwt")
+    - Properties: secret, accessTokenExpiry, refreshTokenExpiry
+
+  auth/service/JwtService.kt
+    - generateAccessToken(userId: UUID, email: String): String
+    - generateRefreshToken(userId: UUID): String
+    - validateToken(token: String): Boolean
+    - extractUserId(token: String): UUID
+    - extractEmail(token: String): String
+    - Uses io.jsonwebtoken library (jjwt)
+
+Dependencies: jjwt-api, jjwt-impl, jjwt-jackson (already in build.gradle.kts)
+
+Expected output:
+  - Unit test: generate token → validate → extract claims succeeds
+  - Expired tokens correctly rejected
+
+
+STEP 2.3: Backend — Auth Service and DTOs
+────────────────────────────────────────────────────────────────────────────────
+What to build:
+  Authentication business logic and request/response DTOs.
+
+Files to create:
+  auth/dto/RegisterRequest.kt
+    - @field:NotBlank name, @field:Email email, @field:Size(min=8) password
+
+  auth/dto/LoginRequest.kt
+    - @field:Email email, @field:NotBlank password
+
+  auth/dto/AuthResponse.kt
+    - accessToken, refreshToken, user: UserProfileResponse
+
+  auth/dto/UserProfileResponse.kt
+    - id, name, email, createdAt
+
+  auth/dto/RefreshTokenRequest.kt
+    - refreshToken: String
+
+  auth/service/AuthService.kt
+    - register(request: RegisterRequest): AuthResponse
+      → Check email uniqueness (throw 409 if exists)
+      → Hash password with BCryptPasswordEncoder
+      → Save user → Generate tokens → Return AuthResponse
+    - login(request: LoginRequest): AuthResponse
+      → Find by email (throw 401 if not found)
+      → Verify password (throw 401 if wrong)
+      → Generate tokens → Return AuthResponse
+    - refreshToken(token: String): AuthResponse
+      → Validate refresh token → Generate new access token
+
+  config/SecurityConfig.kt (initial — permit all for now):
+    @Bean fun passwordEncoder() = BCryptPasswordEncoder(12)
+    @Bean fun securityFilterChain(http: HttpSecurity) = http
+      .csrf { it.disable() }
+      .authorizeHttpRequests { it.anyRequest().permitAll() }
+      .build()
+
+Expected output:
+  - AuthService can register and login users (tested via unit tests)
+  - Passwords are hashed, tokens are generated
+
+
+STEP 2.4: Backend — Auth Controller
+────────────────────────────────────────────────────────────────────────────────
+What to build:
+  REST endpoints for registration, login, and token refresh.
+
+Files to create:
+  auth/controller/AuthController.kt
+    @RestController
+    @RequestMapping("/api/v1/auth")
+    - POST /register → register(@Valid @RequestBody request)
+    - POST /login → login(@Valid @RequestBody request)
+    - POST /refresh → refreshToken(@RequestBody request)
+
+  common/exception/GlobalExceptionHandler.kt
+    @RestControllerAdvice
+    - Handle MethodArgumentNotValidException → 400 with field errors
+    - Handle ResourceNotFoundException → 404
+    - Handle BadRequestException → 400
+    - Handle generic Exception → 500
+
+  common/dto/ApiError.kt
+    - status, error, message, timestamp, fieldErrors (optional)
+
+Expected output:
+  - POST /api/v1/auth/register with valid body → 201 + tokens
+  - POST /api/v1/auth/register with existing email → 409
+  - POST /api/v1/auth/login with correct creds → 200 + tokens
+  - POST /api/v1/auth/login with wrong password → 401
+  Test with: curl -X POST http://localhost:8080/api/v1/auth/register \
+    -H "Content-Type: application/json" \
+    -d '{"name":"Test","email":"test@test.com","password":"Pass1234"}'
+
+
+STEP 2.5: Backend — JWT Authentication Filter
+────────────────────────────────────────────────────────────────────────────────
+What to build:
+  Security filter that validates JWT on every request.
+
+Files to create:
+  auth/security/UserDetailsServiceImpl.kt
+    - Implements UserDetailsService
+    - loadUserByUsername(email: String) → loads from UserRepository
+
+  auth/security/JwtAuthFilter.kt
+    - Extends OncePerRequestFilter
+    - doFilterInternal:
+      → Extract "Authorization: Bearer <token>" header
+      → Validate token via JwtService
+      → Load UserDetails
+      → Set SecurityContextHolder authentication
+      → Continue filter chain
+
+  Update config/SecurityConfig.kt:
+    - Add JwtAuthFilter before UsernamePasswordAuthenticationFilter
+    - Configure path matchers:
+      → permitAll: /api/v1/auth/**
+      → authenticated: everything else
+    - Stateless session management
+    - Disable CSRF (REST API)
+
+  config/CorsConfig.kt:
+    - Allow origins: http://localhost:*, http://10.0.2.2:*
+    - Allow methods: GET, POST, PUT, DELETE
+    - Allow headers: Authorization, Content-Type
+
+Expected output:
+  - Unauthenticated GET /api/v1/zakat/history → 401
+  - Authenticated request with valid JWT → proceeds to controller
+  - Request with expired token → 401
+
+
+STEP 2.6: Frontend — Auth Context and Login Screen
+────────────────────────────────────────────────────────────────────────────────
+What to build:
+  Auth state management and login/register UI.
+
+Files to create:
+  src/types/auth.ts
+    - Types: User, LoginCredentials, RegisterData, AuthState
+
+  src/services/api.ts
+    - Create Axios instance with baseURL
+    - Request interceptor: attach JWT from context
+    - Response interceptor: handle 401 → attempt refresh → retry
+
+  src/services/authService.ts
+    - login(email, password): POST /auth/login
+    - register(name, email, password): POST /auth/register
+    - refreshToken(token): POST /auth/refresh
+
+  src/context/AuthContext.tsx
+    - AuthProvider with useReducer
+    - State: isAuthenticated, user, accessToken, isLoading, error
+    - Actions: login, register, logout, refreshToken
+    - On mount: check AsyncStorage for refresh token → auto-login
+
+  src/screens/auth/LoginScreen.tsx
+    - Email input, password input, login button
+    - Error display below form
+    - "Register" link navigation
+    - Clean, minimal design with Islamic green theme
+
+  src/screens/auth/RegisterScreen.tsx
+    - Name, email, password, confirm password inputs
+    - Validation (client-side)
+    - Register button → navigate to dashboard on success
+
+  src/navigation/AuthStack.tsx
+    - Stack navigator: Login → Register
+
+  src/navigation/AppNavigator.tsx
+    - If authenticated: show MainTabs
+    - If not authenticated: show AuthStack
+
+Expected output:
+  - App shows login screen on fresh launch
+  - User can register → auto-navigates to dashboard
+  - User can login → sees dashboard
+  - Token persists across app restarts (auto-login)
+
+
+================================================================================
+PHASE 3: ZAKAT MODULE
+================================================================================
+Estimated Time: 4-6 hours
+
+STEP 3.1: Backend — Zakat Entity and Repository
+────────────────────────────────────────────────────────────────────────────────
+Files to create:
+  zakat/entity/ZakatRecord.kt
+    - All fields from DB schema
+    - @ManyToOne relationship to User
+    - BigDecimal for all monetary fields
+
+  zakat/repository/ZakatRecordRepository.kt
+    - findByUserIdOrderByYearDesc(userId: UUID): List<ZakatRecord>
+    - findByUserIdAndYear(userId: UUID, year: Int): ZakatRecord?
+    - @Query for sumPaidZakatByUserId
+    - countByUserId(userId: UUID): Int
+
+Expected output:
+  - Entity maps correctly to zakat_records table
+  - Repository queries work (tested via integration test)
+
+
+STEP 3.2: Backend — Zakat DTOs and Service
+────────────────────────────────────────────────────────────────────────────────
+Files to create:
+  zakat/dto/ZakatCalculationRequest.kt
+    - Fields: savings, goldValueUsd, silverValueUsd, investments, debts, currency
+    - Validation: all >= 0
+
+  zakat/dto/ZakatCalculationResponse.kt
+    - totalAssets, totalDebts, netAssets, nisabThreshold, nisabStandard
+    - isEligible, zakatAmount, breakdown object
+
+  zakat/dto/ZakatSaveRequest.kt
+    - year, all asset fields, totalAssets, zakatAmount, isPaid
+
+  zakat/dto/ZakatRecordResponse.kt
+    - All fields including id, timestamps
+
+  zakat/dto/ZakatSummaryResponse.kt
+    - currentYear, currentYearRecord, totalZakatPaidAllTime, totalRecords
+
+  zakat/service/ZakatService.kt
+    Key business logic:
+    
+    NISAB CALCULATION:
+    - Gold Nisab = 87.48 grams × gold price per gram (configurable)
+    - Silver Nisab = 612.36 grams × silver price per gram (configurable)
+    - Default to gold standard (more common scholarly opinion)
+    - Store Nisab prices in application.yml (admin-updatable):
+      nisab:
+        gold-price-per-gram: 63.40  # USD (update periodically)
+        silver-price-per-gram: 0.82  # USD
+    
+    ZAKAT CALCULATION:
+    - total_assets = savings + gold + silver + investments
+    - net_assets = total_assets - debts
+    - If net_assets >= nisab_threshold: zakat = net_assets × 0.025
+    - Else: zakat = 0, isEligible = false
+
+Expected output:
+  - Calculate with assets above Nisab → correct zakat amount (2.5%)
+  - Calculate with assets below Nisab → zakat = 0, not eligible
+  - Save record → persisted to DB with correct user association
+
+
+STEP 3.3: Backend — Zakat Controller
+────────────────────────────────────────────────────────────────────────────────
+Files to create:
+  zakat/controller/ZakatController.kt
+    @RestController
+    @RequestMapping("/api/v1/zakat")
+    - POST /calculate → calculate(@Valid @RequestBody, @AuthenticationPrincipal)
+    - POST /save → save(@Valid @RequestBody, @AuthenticationPrincipal)
+    - GET /history → getHistory(@AuthenticationPrincipal)
+    - GET /summary → getSummary(@AuthenticationPrincipal)
+    - DELETE /{id} → deleteRecord(@PathVariable, @AuthenticationPrincipal)
+
+  Note: @AuthenticationPrincipal extracts the authenticated user from JWT.
+  Create a helper to extract userId from SecurityContext.
+
+Expected output:
+  - All 5 endpoints respond correctly with JWT auth
+  - Calculate returns correct zakat breakdown
+  - Save creates record, history returns it
+  - Delete removes record (only if owned by user)
+  Test with curl using the JWT from login
+
+
+STEP 3.4: Frontend — Zakat Calculator Screen
+────────────────────────────────────────────────────────────────────────────────
+Files to create:
+  src/types/zakat.ts
+    - Types: ZakatCalculation, ZakatRecord, ZakatSummary, AssetInputs
+
+  src/services/zakatService.ts
+    - calculate(assets): POST /zakat/calculate
+    - save(record): POST /zakat/save
+    - getHistory(): GET /zakat/history
+    - getSummary(): GET /zakat/summary
+    - deleteRecord(id): DELETE /zakat/{id}
+
+  src/context/ZakatContext.tsx
+    - ZakatProvider with useReducer
+    - State: calculation, history, summary (each with loading/error)
+    - Actions: calculate, save, fetchHistory, fetchSummary, delete
+
+  src/components/zakat/AssetInputForm.tsx
+    - Labeled numeric inputs: Savings, Gold, Silver, Investments, Debts
+    - Currency display (USD default)
+    - Input formatting (comma-separated thousands)
+
+  src/components/zakat/NisabIndicator.tsx
+    - Visual bar showing net assets vs Nisab threshold
+    - Green if eligible, gray if below
+    - Shows threshold value
+
+  src/components/zakat/CalculationResult.tsx
+    - Breakdown table: each asset category + total
+    - Large prominent zakat amount
+    - "Save Record" and "View Charities" buttons
+
+  src/screens/zakat/ZakatCalculatorScreen.tsx
+    - Combines AssetInputForm + NisabIndicator + CalculationResult
+    - Calculate button triggers API call
+    - Shows result below form
+    - Save confirmation dialog
+
+Expected output:
+  - User enters asset values → taps Calculate → sees zakat amount
+  - Nisab indicator shows eligibility visually
+  - Save persists the record and shows success toast
+
+
+================================================================================
+PHASE 4: TRACKING MODULE
+================================================================================
+Estimated Time: 2-3 hours
+
+STEP 4.1: Frontend — Zakat History Screen
+────────────────────────────────────────────────────────────────────────────────
+Files to create:
+  src/screens/zakat/ZakatHistoryScreen.tsx
+    - FlatList of zakat records (most recent year first)
+    - Each item: year, total assets, zakat amount, paid badge
+    - Expandable cards (tap to see full breakdown)
+    - Swipe-to-delete with confirmation alert
+    - Empty state illustration: "No zakat records yet"
+    - Pull-to-refresh
+
+  src/components/common/EmptyState.tsx
+    - Icon + message + optional CTA button
+
+Expected output:
+  - Screen loads and displays saved zakat records
+  - Records show correct data from backend
+  - Delete works and removes from list
+  - Empty state shown when no records exist
+
+
+STEP 4.2: Backend — Mark Zakat as Paid
+────────────────────────────────────────────────────────────────────────────────
+What to build:
+  Endpoint to update payment status of a zakat record.
+
+Files to modify:
+  zakat/controller/ZakatController.kt
+    - Add: PUT /api/v1/zakat/{id}/pay → markAsPaid(@PathVariable, @AuthPrincipal)
+
+  zakat/service/ZakatService.kt
+    - markAsPaid(userId: UUID, recordId: UUID): ZakatRecordResponse
+      → Find record, verify ownership
+      → Set isPaid = true, paidAt = now()
+      → Save and return
+
+Expected output:
+  - PUT /api/v1/zakat/{id}/pay → updates record, returns updated response
+  - History screen reflects "Paid" badge after marking
+
+
+STEP 4.3: Frontend — Payment Toggle in History
+────────────────────────────────────────────────────────────────────────────────
+What to modify:
+  - ZakatHistoryScreen: add "Mark as Paid" button on unpaid records
+  - zakatService.ts: add markAsPaid(id) API call
+  - ZakatContext: add MARK_PAID action
+
+Expected output:
+  - User taps "Mark as Paid" → confirmation → record updates to paid
+  - Paid badge appears, button disappears
+
+
+================================================================================
+PHASE 5: CHARITY & HADITH MODULES
+================================================================================
+Estimated Time: 3-4 hours
+
+STEP 5.1: Backend — Charity Entity, Repository, Service, Controller
+────────────────────────────────────────────────────────────────────────────────
+Files to create:
+  charity/entity/Charity.kt
+  charity/repository/CharityRepository.kt
+    - findByIsFeaturedTrue(): List<Charity>
+    - findByCategory(category: String, pageable: Pageable): Page<Charity>
+  charity/dto/CharityResponse.kt
+  charity/service/CharityService.kt
+    - listCharities(page, size, category): Page<CharityResponse>
+    - getCharity(id): CharityResponse
+    - getFeaturedCharities(): List<CharityResponse>
+  charity/controller/CharityController.kt
+    - GET / (paginated, optional category filter)
+    - GET /{id}
+    - GET /featured
+
+Expected output:
+  - GET /api/v1/charities → paginated list of charities
+  - GET /api/v1/charities/featured → returns featured charities
+  - Seeded data (Islamic Relief, etc.) appears in responses
+
+
+STEP 5.2: Backend — Hadith Entity, Repository, Service, Controller
+────────────────────────────────────────────────────────────────────────────────
+Files to create:
+  hadith/entity/Hadith.kt
+    - Note: tags field uses @Column(columnDefinition = "TEXT[]")
+    - May need a custom converter for PostgreSQL arrays
+
+  hadith/repository/HadithRepository.kt
+    - findRandom() using native query: ORDER BY RANDOM() LIMIT 1
+    - findByTag(tag) using native query: WHERE :tag = ANY(tags)
+
+  hadith/dto/HadithResponse.kt
+  hadith/service/HadithService.kt
+    - getRandomHadith(): HadithResponse
+    - getByTag(tag): List<HadithResponse>
+    - getById(id): HadithResponse
+  hadith/controller/HadithController.kt
+    - GET /random
+    - GET ?tag=zakat
+    - GET /{id}
+
+Expected output:
+  - GET /api/v1/hadiths/random → returns a random hadith each time
+  - GET /api/v1/hadiths?tag=charity → returns hadiths tagged "charity"
+  - Arabic text renders correctly in JSON response
+
+
+STEP 5.3: Frontend — Charity List Screen
+────────────────────────────────────────────────────────────────────────────────
+Files to create:
+  src/types/charity.ts
+  src/services/charityService.ts
+  src/components/charity/CharityCard.tsx
+    - Logo placeholder, name, description (2 lines)
+    - Category badge, location, credibility indicator
+    - "Visit Website" → Linking.openURL(websiteUrl)
+  src/screens/charity/CharityListScreen.tsx
+    - Category filter chips at top
+    - FlatList of CharityCards
+    - Featured section pinned at top
+
+Expected output:
+  - Screen displays all seeded charities
+  - Category filter works
+  - Tapping "Visit Website" opens browser
+
+
+STEP 5.4: Frontend — Hadith Banner Component
+────────────────────────────────────────────────────────────────────────────────
+Files to create:
+  src/types/hadith.ts
+  src/services/hadithService.ts
+  src/hooks/useHadith.ts
+    - Fetches random hadith on mount
+    - Auto-refreshes every 30 seconds (or on pull-to-refresh)
+  src/components/dashboard/HadithBanner.tsx
+    - Card with light green background
+    - Arabic text (larger, centered, RTL)
+    - English translation (smaller, below)
+    - Source + narrator (footer)
+    - Subtle refresh icon
+
+Expected output:
+  - Dashboard shows a hadith card
+  - Hadith changes on refresh
+  - Arabic text displays correctly (right-to-left)
+
+
+================================================================================
+PHASE 6: DASHBOARD & FRONTEND INTEGRATION
+================================================================================
+Estimated Time: 3-4 hours
+
+STEP 6.1: Dashboard Screen Assembly
+────────────────────────────────────────────────────────────────────────────────
+Files to create/modify:
+  src/components/dashboard/ZakatSummaryCard.tsx
+    - If no calculation this year: "Calculate your Zakat" CTA
+    - If calculated: show amount, paid status, total assets
+    - Tap navigates to calculator or history
+
+  src/components/dashboard/QuickActions.tsx
+    - Two buttons: "Calculate Zakat" → Calculator, "View History" → History
+
+  src/components/dashboard/CharitySpotlight.tsx
+    - Horizontal ScrollView with 2-3 featured charity cards (compact)
+
+  src/screens/dashboard/DashboardScreen.tsx
+    - Header: "Assalamu Alaikum, {user.name}"
+    - ScrollView containing:
+      1. HadithBanner
+      2. ZakatSummaryCard
+      3. QuickActions
+      4. CharitySpotlight
+    - Pull-to-refresh reloads all data
+
+Expected output:
+  - Dashboard shows all sections with real data
+  - Navigation between sections works smoothly
+  - Pull-to-refresh updates everything
+
+
+STEP 6.2: Bottom Tab Navigation
+────────────────────────────────────────────────────────────────────────────────
+Files to create:
+  src/navigation/MainTabs.tsx
+    - Bottom tab navigator with 4 tabs:
+      1. Home (Dashboard) — home icon
+      2. Calculate (Zakat Calculator) — calculator icon
+      3. History (Zakat History) — clock/list icon
+      4. Charities (Charity List) — heart icon
+    - Active tab: Islamic green, inactive: gray
+    - Tab bar style: clean, minimal, slight shadow
+
+Expected output:
+  - All 4 tabs navigate correctly
+  - Tab icons and labels display properly
+  - Active state highlighted in green
+
+
+STEP 6.3: Styling and Polish
+────────────────────────────────────────────────────────────────────────────────
+What to build:
+  Consistent theming inspired by Quran.com.
+
+Files to create/modify:
+  src/constants/typography.ts
+    - Font family: System default (or custom Arabic-friendly font)
+    - Heading sizes, body sizes, caption sizes
+
+  src/components/common/Card.tsx
+    - Rounded corners (12px), subtle shadow, white background
+    - Consistent padding (16px)
+
+  src/components/common/Button.tsx
+    - Primary: green background, white text, rounded
+    - Secondary: outlined, green border
+    - Loading state with ActivityIndicator
+
+  General polish:
+    - Add loading spinners for all API calls
+    - Add error toasts/alerts for failures
+    - Keyboard-aware scroll views on forms
+    - Input validation feedback (red borders, error messages)
+    - Smooth transitions between screens
+
+Expected output:
+  - App has consistent, clean Islamic-inspired design
+  - All interactions have loading/error states
+  - Keyboard doesn't cover inputs on forms
+
+
+STEP 6.4: Combine Context Providers
+────────────────────────────────────────────────────────────────────────────────
+Files to create:
+  src/context/AppProvider.tsx
+    - Wraps AuthProvider + ZakatProvider
+    - Provides combined context to entire app
+
+  Update App.tsx:
+    <AppProvider>
+      <NavigationContainer>
+        <AppNavigator />
+      </NavigationContainer>
+    </AppProvider>
+
+Expected output:
+  - All screens have access to auth and zakat state
+  - State updates propagate correctly across screens
+
+
+================================================================================
+PHASE 7: TESTING, SECURITY HARDENING & DEPLOYMENT
+================================================================================
+Estimated Time: 3-5 hours
+
+STEP 7.1: Backend — Unit and Integration Tests
+────────────────────────────────────────────────────────────────────────────────
+Files to create:
+  test/kotlin/com/zakatapp/
+  ├── auth/
+  │   ├── AuthServiceTest.kt        (unit test — mock repo)
+  │   ├── JwtServiceTest.kt         (unit test)
+  │   └── AuthControllerTest.kt     (integration — @WebMvcTest)
+  ├── zakat/
+  │   ├── ZakatServiceTest.kt       (unit test — test Nisab logic)
+  │   └── ZakatControllerTest.kt    (integration)
+  └── TestConfig.kt                 (shared test configuration)
+
+Key test cases:
+  - Register with duplicate email → 409
+  - Login with wrong password → 401
+  - Calculate zakat below Nisab → zakatAmount = 0
+  - Calculate zakat above Nisab → zakatAmount = net * 0.025
+  - Save duplicate year for same user → appropriate handling
+  - Access protected endpoint without token → 401
+  - Access another user's record → 403
+
+Expected output:
+  - `./gradlew test` — all tests pass
+  - Minimum 80% coverage on service layer
+
+
+STEP 7.2: Security Hardening
+────────────────────────────────────────────────────────────────────────────────
+What to add:
+  - Rate limiting on /api/v1/auth/** (e.g., 5 requests/minute per IP)
+    → Use bucket4j or Spring's built-in rate limiter
+  - Input sanitization (already handled by JPA parameterized queries)
+  - Response headers: X-Content-Type-Options, X-Frame-Options
+  - Password validation: min 8 chars, 1 uppercase, 1 digit
+  - Validate JWT issuer and audience claims
+  - Log authentication failures (for monitoring)
+
+Files to modify:
+  config/SecurityConfig.kt — add security headers
+  auth/service/AuthService.kt — add password policy validation
+
+Expected output:
+  - Brute force login attempts are rate-limited
+  - All security headers present in responses
+  - Weak passwords rejected at registration
+
+
+STEP 7.3: Backend — Dockerize
+────────────────────────────────────────────────────────────────────────────────
+Files to create:
+  Dockerfile:
+    FROM eclipse-temurin:17-jre-alpine
+    WORKDIR /app
+    COPY build/libs/zakat-backend-*.jar app.jar
+    EXPOSE 8080
+    ENTRYPOINT ["java", "-jar", "app.jar"]
+
+  Update docker-compose.yml:
+    services:
+      app:
+        build: .
+        ports:
+          - "8080:8080"
+        depends_on:
+          - postgres
+        environment:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/zakatdb
+          JWT_SECRET: ${JWT_SECRET}
+      postgres:
+        image: postgres:15-alpine
+        ...
+
+Build:
+  ./gradlew bootJar
+  docker-compose up --build
+
+Expected output:
+  - `docker-compose up` starts both PostgreSQL and backend
+  - API accessible at http://localhost:8080
+  - Migrations run automatically on startup
+
+
+STEP 7.4: Frontend — Build and Testing
+────────────────────────────────────────────────────────────────────────────────
+What to do:
+  - Test on both iOS simulator and Android emulator
+  - Fix platform-specific issues (keyboard, safe areas, status bar)
+  - Build production APK:
+    cd android && ./gradlew assembleRelease
+  - Build production iOS:
+    npx react-native run-ios --configuration Release
+
+Expected output:
+  - App runs smoothly on both platforms
+  - No console errors or warnings
+  - Production builds generated
+
+
+STEP 7.5: Deployment Checklist
+────────────────────────────────────────────────────────────────────────────────
+Backend deployment (e.g., AWS EC2 / Railway / Render):
+  □ Set JWT_SECRET as environment variable (strong 256-bit key)
+  □ Set SPRING_PROFILES_ACTIVE=prod
+  □ Configure production PostgreSQL (e.g., AWS RDS / Supabase)
+  □ Enable HTTPS (TLS certificate)
+  □ Set up application logging (SLF4J → CloudWatch / ELK)
+  □ Configure CORS for production domain
+  □ Set up health check endpoint: /actuator/health
+  □ Database backups (daily automated)
+
+Frontend deployment:
+  □ Update API_BASE_URL to production URL
+  □ Generate release signing key (Android)
+  □ Build signed APK/AAB for Play Store
+  □ Build IPA for App Store (requires Apple Developer account)
+  □ Test on physical devices before submission
+
+Monitoring:
+  □ Set up uptime monitoring (e.g., UptimeRobot)
+  □ Error tracking (Sentry for backend + frontend)
+  □ API response time monitoring
+
+
+================================================================================
+POST-LAUNCH ENHANCEMENTS (FUTURE PHASES)
+================================================================================
+
+Phase 8 (Optional): Advanced Features
+  - Push notifications for Zakat reminders (Ramadan, annual anniversary)
+  - Live gold/silver price integration via API (e.g., GoldAPI.io)
+  - Multi-currency support with exchange rate conversion
+  - Zakat al-Fitr calculator (separate from Zakat al-Mal)
+  - PDF export of zakat records
+  - Share zakat calculation with family members
+  - Admin panel for managing charities and hadiths
+  - Offline mode with local SQLite sync
+
+Phase 9 (Optional): Social & Community
+  - Community zakat fund (pool zakat for large projects)
+  - Charity reviews and ratings by users
+  - Zakat distribution tracking (show where your zakat went)
+
+
+================================================================================
+                  END OF STEP-BY-STEP IMPLEMENTATION PLAN
+================================================================================

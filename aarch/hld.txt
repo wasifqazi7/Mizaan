@@ -1,0 +1,194 @@
+================================================================================
+                HIGH-LEVEL DESIGN (HLD)
+        Zakat Calculation & Charity Recommendation App
+================================================================================
+
+1. SYSTEM ARCHITECTURE DIAGRAM (Text)
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          CLIENT LAYER                                       │
+│                                                                             │
+│   ┌───────────────────────────────────────────────────────────────────────┐ │
+│   │                  React Native Mobile App                              │ │
+│   │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │ │
+│   │  │  Login   │ │Dashboard │ │  Zakat   │ │ History  │ │Charities │  │ │
+│   │  │  Screen  │ │  Screen  │ │Calculator│ │  Screen  │ │  Screen  │  │ │
+│   │  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘  │ │
+│   │                                                                       │ │
+│   │  ┌──────────────────────────────────────────────────────────────────┐ │ │
+│   │  │            State Management (Context API / Redux)                │ │ │
+│   │  └──────────────────────────────────────────────────────────────────┘ │ │
+│   │  ┌──────────────────────────────────────────────────────────────────┐ │ │
+│   │  │            HTTP Client (Axios) + JWT Interceptor                 │ │ │
+│   │  └──────────────────────────────────────────────────────────────────┘ │ │
+│   └───────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                              HTTPS / REST
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         API GATEWAY / BACKEND                               │
+│                                                                             │
+│   ┌───────────────────────────────────────────────────────────────────────┐ │
+│   │                   Spring Boot Application                             │ │
+│   │                                                                       │ │
+│   │   ┌─────────────────────────────────────────────────────────────────┐ │ │
+│   │   │                    CONTROLLER LAYER                             │ │ │
+│   │   │  AuthController │ ZakatController │ CharityController │         │ │ │
+│   │   │                                    HadithController             │ │ │
+│   │   └─────────────────────────────────────────────────────────────────┘ │ │
+│   │                              │                                        │ │
+│   │   ┌─────────────────────────────────────────────────────────────────┐ │ │
+│   │   │              SECURITY FILTER CHAIN (JWT)                        │ │ │
+│   │   └─────────────────────────────────────────────────────────────────┘ │ │
+│   │                              │                                        │ │
+│   │   ┌─────────────────────────────────────────────────────────────────┐ │ │
+│   │   │                    SERVICE LAYER                                │ │ │
+│   │   │  AuthService │ ZakatService │ CharityService │ HadithService    │ │ │
+│   │   └─────────────────────────────────────────────────────────────────┘ │ │
+│   │                              │                                        │ │
+│   │   ┌─────────────────────────────────────────────────────────────────┐ │ │
+│   │   │                  REPOSITORY LAYER (JPA)                         │ │ │
+│   │   │  UserRepo │ ZakatRecordRepo │ CharityRepo │ HadithRepo         │ │ │
+│   │   └─────────────────────────────────────────────────────────────────┘ │ │
+│   └───────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                               JDBC / JPA
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          DATA LAYER                                         │
+│                                                                             │
+│   ┌───────────────────────────────────────────────────────────────────────┐ │
+│   │                     PostgreSQL Database                                │ │
+│   │                                                                       │ │
+│   │   ┌─────────┐  ┌──────────────┐  ┌───────────┐  ┌─────────────┐     │ │
+│   │   │  users  │  │ zakat_records │  │ charities │  │   hadiths   │     │ │
+│   │   └─────────┘  └──────────────┘  └───────────┘  └─────────────┘     │ │
+│   └───────────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+2. MAJOR COMPONENTS
+================================================================================
+
+A. Frontend (React Native)
+   - Cross-platform mobile app (iOS + Android)
+   - Screens: Login, Register, Dashboard, Zakat Calculator, History, Charities
+   - Communicates with backend via RESTful APIs over HTTPS
+   - JWT token stored in secure storage (AsyncStorage / Keychain)
+   - Spiritual, minimal UI inspired by Quran.com
+
+B. Backend (Spring Boot / Kotlin)
+   - Monolithic REST API server
+   - JWT-based stateless authentication
+   - Layered architecture: Controller → Service → Repository
+   - DTOs for all API communication (no entity leakage)
+   - Business logic: Nisab threshold calculation, Zakat computation
+   - Hadith rotation logic with tag-based filtering
+
+C. Database (PostgreSQL)
+   - Relational database with 4 core tables
+   - Foreign key relationships: users ← zakat_records
+   - Seeded data: charities, hadiths (via Flyway migrations)
+   - Indexed on user_id, year, tags for performant queries
+
+
+3. DATA FLOW
+================================================================================
+
+A. Authentication Flow
+   User → POST /api/auth/register → Backend creates user, returns JWT
+   User → POST /api/auth/login → Backend validates, returns JWT
+   All subsequent requests include: Authorization: Bearer <jwt>
+
+B. Zakat Calculation Flow
+   User enters assets (savings, gold, silver, investments, debts)
+       → POST /api/zakat/calculate
+       → ZakatService checks Nisab threshold (gold/silver standard)
+       → If assets >= Nisab: zakat = (total_assets - debts) * 0.025
+       → Returns calculation result (not persisted yet)
+       → User confirms → POST /api/zakat/save → persists to zakat_records
+
+C. Dashboard Flow
+   App loads → GET /api/zakat/summary (current year status)
+             → GET /api/hadiths/random (rotating hadith)
+             → GET /api/charities?featured=true (recommended charities)
+   All data assembled into dashboard view
+
+D. History Flow
+   GET /api/zakat/history → returns all zakat_records for user, ordered by year
+
+
+4. KEY DESIGN DECISIONS
+================================================================================
+
+Decision 1: Monolith over Microservices
+   Rationale: The app has 4 bounded contexts (auth, zakat, charity, hadith) that
+   are tightly coupled and low-complexity. A monolith is simpler to deploy,
+   debug, and maintain. Microservices would be overengineering at this scale.
+   Future: Can extract services if traffic patterns demand it.
+
+Decision 2: JWT (Stateless) over Session-based Auth
+   Rationale: Mobile apps benefit from stateless tokens. No server-side session
+   storage needed. JWTs are self-contained and work well with REST APIs.
+   Access token: 15-minute expiry. Refresh token: 7-day expiry.
+
+Decision 3: PostgreSQL over NoSQL
+   Rationale: Data is relational (users → zakat_records). PostgreSQL supports
+   JSON columns for flexible metadata (charity details). ACID compliance
+   ensures financial data integrity for zakat records.
+
+Decision 4: DTOs for All API Communication
+   Rationale: Prevents entity leakage (password hashes, internal IDs).
+   Decouples API contract from database schema. Enables API versioning.
+
+Decision 5: Server-side Nisab Calculation
+   Rationale: Nisab threshold (based on gold/silver prices) must be
+   authoritative. Client-side calculation could be tampered with.
+   Server fetches current gold/silver prices or uses admin-configured values.
+
+Decision 6: Context API over Redux (Frontend)
+   Rationale: App state is straightforward (auth state, zakat data, UI state).
+   Context API with useReducer is sufficient and avoids Redux boilerplate.
+   Can migrate to Redux Toolkit if state complexity grows.
+
+
+5. SCALABILITY CONSIDERATIONS
+================================================================================
+
+A. Horizontal Scaling
+   - Backend is stateless (JWT) → can run multiple instances behind a load balancer
+   - Database connection pooling via HikariCP (default in Spring Boot)
+   - Read replicas for PostgreSQL if read traffic grows
+
+B. Caching
+   - Hadith list: cache in Redis or in-memory (changes infrequently)
+   - Charity list: cache with 1-hour TTL
+   - Nisab threshold: cache gold/silver prices with 24-hour TTL
+   - User dashboard data: cache per-user with 5-minute TTL
+
+C. Database Optimization
+   - Index on zakat_records(user_id, year) for history queries
+   - Index on hadiths(tags) for tag-based filtering
+   - Pagination on all list endpoints (charities, history)
+
+D. Future Scaling Path
+   - Extract Hadith service into a standalone microservice if content grows
+   - Add CDN for static charity logos/images
+   - Introduce message queue (RabbitMQ) for async notifications
+   - Add push notifications for Zakat reminders (Ramadan, annual)
+
+E. Security at Scale
+   - Rate limiting on auth endpoints (prevent brute force)
+   - API rate limiting per user (prevent abuse)
+   - HTTPS everywhere (TLS 1.3)
+   - Input validation and SQL injection prevention (JPA parameterized queries)
+   - OWASP security headers
+
+================================================================================
+                         END OF HIGH-LEVEL DESIGN
+================================================================================

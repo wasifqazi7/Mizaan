@@ -1,0 +1,302 @@
+================================================================================
+                      DATABASE SCHEMA
+        Zakat Calculation & Charity Recommendation App
+================================================================================
+
+DATABASE: PostgreSQL 15+
+SCHEMA: public
+CHARACTER SET: UTF-8 (supports Arabic text)
+
+================================================================================
+1. TABLE: users
+================================================================================
+
+Purpose: Stores registered user accounts
+
+CREATE TABLE users (
+    id              UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    name            VARCHAR(100)    NOT NULL,
+    email           VARCHAR(255)    NOT NULL UNIQUE,
+    password_hash   VARCHAR(255)    NOT NULL,
+    created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes
+CREATE UNIQUE INDEX idx_users_email ON users(email);
+
+┌────────────────┬───────────────┬──────────┬─────────┬──────────────────────┐
+│ Column         │ Type          │ Nullable │ Default │ Notes                │
+├────────────────┼───────────────┼──────────┼─────────┼──────────────────────┤
+│ id             │ UUID          │ NO       │ auto    │ Primary key          │
+│ name           │ VARCHAR(100)  │ NO       │ -       │ User's full name     │
+│ email          │ VARCHAR(255)  │ NO       │ -       │ Unique, used for     │
+│                │               │          │         │ login                │
+│ password_hash  │ VARCHAR(255)  │ NO       │ -       │ BCrypt hashed        │
+│ created_at     │ TIMESTAMP     │ NO       │ NOW()   │ Account creation     │
+│ updated_at     │ TIMESTAMP     │ NO       │ NOW()   │ Last profile update  │
+└────────────────┴───────────────┴──────────┴─────────┴──────────────────────┘
+
+
+================================================================================
+2. TABLE: zakat_records
+================================================================================
+
+Purpose: Stores yearly zakat calculations and payment status for each user
+
+CREATE TABLE zakat_records (
+    id              UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id         UUID            NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    year            INTEGER         NOT NULL,
+    savings         DECIMAL(15,2)   NOT NULL DEFAULT 0.00,
+    gold_value_usd  DECIMAL(15,2)   NOT NULL DEFAULT 0.00,
+    silver_value_usd DECIMAL(15,2)  NOT NULL DEFAULT 0.00,
+    investments     DECIMAL(15,2)   NOT NULL DEFAULT 0.00,
+    debts           DECIMAL(15,2)   NOT NULL DEFAULT 0.00,
+    total_assets    DECIMAL(15,2)   NOT NULL,
+    zakat_amount    DECIMAL(15,2)   NOT NULL,
+    is_paid         BOOLEAN         NOT NULL DEFAULT FALSE,
+    paid_at         TIMESTAMP       NULL,
+    notes           TEXT            NULL,
+    created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    CONSTRAINT uq_user_year UNIQUE (user_id, year),
+    CONSTRAINT chk_year CHECK (year >= 1400 AND year <= 2100),
+    CONSTRAINT chk_savings CHECK (savings >= 0),
+    CONSTRAINT chk_gold CHECK (gold_value_usd >= 0),
+    CONSTRAINT chk_silver CHECK (silver_value_usd >= 0),
+    CONSTRAINT chk_investments CHECK (investments >= 0),
+    CONSTRAINT chk_debts CHECK (debts >= 0),
+    CONSTRAINT chk_zakat CHECK (zakat_amount >= 0)
+);
+
+-- Indexes
+CREATE INDEX idx_zakat_user_id ON zakat_records(user_id);
+CREATE INDEX idx_zakat_user_year ON zakat_records(user_id, year DESC);
+CREATE INDEX idx_zakat_is_paid ON zakat_records(user_id, is_paid);
+
+┌──────────────────┬───────────────┬──────────┬─────────┬────────────────────┐
+│ Column           │ Type          │ Nullable │ Default │ Notes              │
+├──────────────────┼───────────────┼──────────┼─────────┼────────────────────┤
+│ id               │ UUID          │ NO       │ auto    │ Primary key        │
+│ user_id          │ UUID          │ NO       │ -       │ FK → users.id      │
+│ year             │ INTEGER       │ NO       │ -       │ Gregorian year     │
+│ savings          │ DECIMAL(15,2) │ NO       │ 0.00    │ Cash + bank        │
+│ gold_value_usd   │ DECIMAL(15,2) │ NO       │ 0.00    │ Gold in USD        │
+│ silver_value_usd │ DECIMAL(15,2) │ NO       │ 0.00    │ Silver in USD      │
+│ investments      │ DECIMAL(15,2) │ NO       │ 0.00    │ Stocks, crypto     │
+│ debts            │ DECIMAL(15,2) │ NO       │ 0.00    │ Outstanding debts  │
+│ total_assets     │ DECIMAL(15,2) │ NO       │ -       │ Computed total     │
+│ zakat_amount     │ DECIMAL(15,2) │ NO       │ -       │ 2.5% of net if     │
+│                  │               │          │         │ above Nisab        │
+│ is_paid          │ BOOLEAN       │ NO       │ false   │ Payment status     │
+│ paid_at          │ TIMESTAMP     │ YES      │ null    │ When zakat was     │
+│                  │               │          │         │ paid               │
+│ notes            │ TEXT          │ YES      │ null    │ Optional user note │
+│ created_at       │ TIMESTAMP     │ NO       │ NOW()   │ Record creation    │
+│ updated_at       │ TIMESTAMP     │ NO       │ NOW()   │ Last modification  │
+└──────────────────┴───────────────┴──────────┴─────────┴────────────────────┘
+
+
+================================================================================
+3. TABLE: charities
+================================================================================
+
+Purpose: Stores trusted charity organizations for zakat/sadaqah distribution
+
+CREATE TABLE charities (
+    id                  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    name                VARCHAR(255)    NOT NULL,
+    description         TEXT            NOT NULL,
+    website_url         VARCHAR(500)    NOT NULL,
+    logo_url            VARCHAR(500)    NULL,
+    category            VARCHAR(50)     NOT NULL DEFAULT 'ZAKAT',
+    location            VARCHAR(100)    NOT NULL DEFAULT 'Global',
+    credibility_rating  VARCHAR(20)     NOT NULL DEFAULT 'HIGH',
+    is_featured         BOOLEAN         NOT NULL DEFAULT FALSE,
+    contact_email       VARCHAR(255)    NULL,
+    contact_phone       VARCHAR(50)     NULL,
+    created_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    
+    CONSTRAINT chk_category CHECK (
+        category IN ('ZAKAT', 'SADAQAH', 'EMERGENCY', 'EDUCATION', 'HEALTHCARE')
+    ),
+    CONSTRAINT chk_credibility CHECK (
+        credibility_rating IN ('HIGH', 'MEDIUM')
+    )
+);
+
+-- Indexes
+CREATE INDEX idx_charities_category ON charities(category);
+CREATE INDEX idx_charities_featured ON charities(is_featured) WHERE is_featured = TRUE;
+
+┌────────────────────┬──────────────┬──────────┬─────────┬──────────────────┐
+│ Column             │ Type         │ Nullable │ Default │ Notes            │
+├────────────────────┼──────────────┼──────────┼─────────┼──────────────────┤
+│ id                 │ UUID         │ NO       │ auto    │ Primary key      │
+│ name               │ VARCHAR(255) │ NO       │ -       │ Charity name     │
+│ description        │ TEXT         │ NO       │ -       │ About the org    │
+│ website_url        │ VARCHAR(500) │ NO       │ -       │ Official website │
+│ logo_url           │ VARCHAR(500) │ YES      │ null    │ Logo image URL   │
+│ category           │ VARCHAR(50)  │ NO       │ ZAKAT   │ Service category │
+│ location           │ VARCHAR(100) │ NO       │ Global  │ Operating region │
+│ credibility_rating │ VARCHAR(20)  │ NO       │ HIGH    │ Trust rating     │
+│ is_featured        │ BOOLEAN      │ NO       │ false   │ Show on homepage │
+│ contact_email      │ VARCHAR(255) │ YES      │ null    │ Contact email    │
+│ contact_phone      │ VARCHAR(50)  │ YES      │ null    │ Contact phone    │
+│ created_at         │ TIMESTAMP    │ NO       │ NOW()   │ Row creation     │
+│ updated_at         │ TIMESTAMP    │ NO       │ NOW()   │ Last update      │
+└────────────────────┴──────────────┴──────────┴─────────┴──────────────────┘
+
+
+================================================================================
+4. TABLE: hadiths
+================================================================================
+
+Purpose: Internal hadith database for charity/zakat-related hadiths
+
+CREATE TABLE hadiths (
+    id              UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    text_arabic     TEXT            NOT NULL,
+    text_english    TEXT            NOT NULL,
+    source          VARCHAR(255)    NOT NULL,
+    narrator        VARCHAR(255)    NOT NULL,
+    tags            TEXT[]          NOT NULL DEFAULT '{}',
+    hadith_number   VARCHAR(50)     NULL,
+    book_reference  VARCHAR(255)    NULL,
+    created_at      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes
+CREATE INDEX idx_hadiths_tags ON hadiths USING GIN(tags);
+CREATE INDEX idx_hadiths_source ON hadiths(source);
+
+┌─────────────────┬──────────────┬──────────┬─────────┬──────────────────────┐
+│ Column          │ Type         │ Nullable │ Default │ Notes                │
+├─────────────────┼──────────────┼──────────┼─────────┼──────────────────────┤
+│ id              │ UUID         │ NO       │ auto    │ Primary key          │
+│ text_arabic     │ TEXT         │ NO       │ -       │ Arabic hadith text   │
+│ text_english    │ TEXT         │ NO       │ -       │ English translation  │
+│ source          │ VARCHAR(255) │ NO       │ -       │ e.g. Sahih Bukhari   │
+│ narrator        │ VARCHAR(255) │ NO       │ -       │ e.g. Abu Hurairah    │
+│ tags            │ TEXT[]       │ NO       │ {}      │ PostgreSQL array:    │
+│                 │              │          │         │ {zakat,charity,...}   │
+│ hadith_number   │ VARCHAR(50)  │ YES      │ null    │ e.g. "2442"          │
+│ book_reference  │ VARCHAR(255) │ YES      │ null    │ Book + chapter ref   │
+│ created_at      │ TIMESTAMP    │ NO       │ NOW()   │ Row creation         │
+└─────────────────┴──────────────┴──────────┴─────────┴──────────────────────┘
+
+
+================================================================================
+5. RELATIONSHIPS DIAGRAM
+================================================================================
+
+    ┌──────────────┐
+    │    users     │
+    │──────────────│
+    │ id (PK)      │──────────┐
+    │ name         │          │
+    │ email (UQ)   │          │  1:N (One user has many zakat records)
+    │ password_hash│          │
+    │ created_at   │          │
+    │ updated_at   │          │
+    └──────────────┘          │
+                              │
+                              ▼
+                    ┌──────────────────┐
+                    │  zakat_records   │
+                    │──────────────────│
+                    │ id (PK)          │
+                    │ user_id (FK)     │──→ users.id (CASCADE DELETE)
+                    │ year             │
+                    │ savings          │
+                    │ gold_value_usd   │
+                    │ silver_value_usd │
+                    │ investments      │
+                    │ debts            │
+                    │ total_assets     │
+                    │ zakat_amount     │
+                    │ is_paid          │
+                    │ paid_at          │
+                    │ created_at       │
+                    │ updated_at       │
+                    │                  │
+                    │ UQ(user_id, year)│  ← One record per user per year
+                    └──────────────────┘
+
+    ┌──────────────────┐       ┌──────────────────┐
+    │   charities      │       │    hadiths       │
+    │──────────────────│       │──────────────────│
+    │ id (PK)          │       │ id (PK)          │
+    │ name             │       │ text_arabic      │
+    │ description      │       │ text_english     │
+    │ website_url      │       │ source           │
+    │ logo_url         │       │ narrator         │
+    │ category         │       │ tags (TEXT[])     │  ← GIN indexed array
+    │ location         │       │ hadith_number    │
+    │ credibility_rating│      │ book_reference   │
+    │ is_featured      │       │ created_at       │
+    │ contact_email    │       └──────────────────┘
+    │ contact_phone    │
+    │ created_at       │       Both standalone tables —
+    │ updated_at       │       no FK relationships.
+    └──────────────────┘       Admin-managed / seeded data.
+
+
+================================================================================
+6. SEED DATA (Flyway Migration V5)
+================================================================================
+
+-- Sample Charities
+INSERT INTO charities (name, description, website_url, category, location,
+                       credibility_rating, is_featured) VALUES
+('Islamic Relief Worldwide',
+ 'Faith-inspired humanitarian organization providing aid in over 40 countries.',
+ 'https://www.islamic-relief.org', 'ZAKAT', 'Global', 'HIGH', TRUE),
+
+('Muslim Aid',
+ 'International charity providing emergency relief and development programs.',
+ 'https://www.muslimaid.org', 'ZAKAT', 'Global', 'HIGH', TRUE),
+
+('Zakat Foundation of America',
+ 'US-based nonprofit facilitating zakat collection and distribution.',
+ 'https://www.zakat.org', 'ZAKAT', 'USA', 'HIGH', TRUE),
+
+('Penny Appeal',
+ 'Charity providing poverty relief across Asia, Middle East, and Africa.',
+ 'https://www.pennyappeal.org', 'SADAQAH', 'Global', 'HIGH', FALSE),
+
+('Human Appeal',
+ 'Nonprofit delivering humanitarian aid and sustainable development.',
+ 'https://www.humanappeal.org.uk', 'EMERGENCY', 'Global', 'HIGH', FALSE);
+
+
+-- Sample Hadiths (charity/zakat related)
+INSERT INTO hadiths (text_arabic, text_english, source, narrator, tags,
+                     hadith_number) VALUES
+('مَا نَقَصَتْ صَدَقَةٌ مِنْ مَالٍ',
+ 'Charity does not decrease wealth.',
+ 'Sahih Muslim', 'Abu Hurairah (RA)', '{charity,sadaqah,wealth}', '2588'),
+
+('اتَّقُوا النَّارَ وَلَوْ بِشِقِّ تَمْرَةٍ',
+ 'Protect yourselves from the Fire even if with half a date (in charity).',
+ 'Sahih Bukhari', 'Adi ibn Hatim (RA)', '{charity,sadaqah,fire}', '1417'),
+
+('مَنْ تَصَدَّقَ بِعَدْلِ تَمْرَةٍ مِنْ كَسْبٍ طَيِّبٍ',
+ 'Whoever gives charity equal to a date from lawfully earned money — and Allah only accepts that which is good — Allah will accept it with His right Hand and nurture it for its owner.',
+ 'Sahih Bukhari', 'Abu Hurairah (RA)', '{charity,sadaqah,sincerity}', '1410'),
+
+('الصَّدَقَةُ تُطْفِئُ الْخَطِيئَةَ كَمَا يُطْفِئُ الْمَاءُ النَّارَ',
+ 'Charity extinguishes sin as water extinguishes fire.',
+ 'Tirmidhi', 'Muadh ibn Jabal (RA)', '{charity,sadaqah,sins}', '2616'),
+
+('فِي الْمَالِ حَقٌّ سِوَى الزَّكَاةِ',
+ 'There is a duty on wealth apart from Zakat.',
+ 'Tirmidhi', 'Fatimah bint Qais (RA)', '{zakat,charity,duty}', '659');
+
+
+================================================================================
+                       END OF DATABASE SCHEMA
+================================================================================

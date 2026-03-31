@@ -1,0 +1,832 @@
+================================================================================
+                      LOW-LEVEL DESIGN (LLD)
+        Zakat Calculation & Charity Recommendation App
+================================================================================
+
+================================================================================
+PART A: BACKEND LOW-LEVEL DESIGN
+================================================================================
+
+1. CONTROLLERS
+================================================================================
+
+A. AuthController
+   Path: /api/v1/auth
+   Responsibilities:
+   - Handle user registration (validate input, delegate to AuthService)
+   - Handle user login (authenticate, return JWT tokens)
+   - Handle token refresh (validate refresh token, issue new access token)
+   - Handle profile retrieval for authenticated user
+
+   Methods:
+   ┌──────────────────────────────────────────────────────────────────────────┐
+   │ Method             │ HTTP      │ Path       │ Auth     │ Returns        │
+   ├──────────────────────────────────────────────────────────────────────────┤
+   │ register()         │ POST      │ /register  │ No       │ AuthResponse   │
+   │ login()            │ POST      │ /login     │ No       │ AuthResponse   │
+   │ refreshToken()     │ POST      │ /refresh   │ No       │ AuthResponse   │
+   │ getProfile()       │ GET       │ /profile   │ Yes      │ UserProfile    │
+   └──────────────────────────────────────────────────────────────────────────┘
+
+B. ZakatController
+   Path: /api/v1/zakat
+   Responsibilities:
+   - Accept asset inputs and return zakat calculation
+   - Save confirmed zakat records
+   - Retrieve history and summary for authenticated user
+   - Delete zakat records
+
+   Methods:
+   ┌──────────────────────────────────────────────────────────────────────────┐
+   │ Method             │ HTTP      │ Path        │ Auth    │ Returns        │
+   ├──────────────────────────────────────────────────────────────────────────┤
+   │ calculate()        │ POST      │ /calculate  │ Yes     │ CalcResponse   │
+   │ save()             │ POST      │ /save       │ Yes     │ RecordResponse │
+   │ getHistory()       │ GET       │ /history    │ Yes     │ List<Record>   │
+   │ getSummary()       │ GET       │ /summary    │ Yes     │ SummaryResp    │
+   │ deleteRecord()     │ DELETE    │ /{id}       │ Yes     │ 204 No Content │
+   └──────────────────────────────────────────────────────────────────────────┘
+
+C. CharityController
+   Path: /api/v1/charities
+   Responsibilities:
+   - List all charities with pagination and optional filters
+   - Return charity details by ID
+   - Return featured/recommended charities
+
+   Methods:
+   ┌──────────────────────────────────────────────────────────────────────────┐
+   │ Method             │ HTTP      │ Path        │ Auth    │ Returns        │
+   ├──────────────────────────────────────────────────────────────────────────┤
+   │ listCharities()    │ GET       │ /           │ Yes     │ Page<Charity>  │
+   │ getCharity()       │ GET       │ /{id}       │ Yes     │ CharityResp    │
+   │ getFeatured()      │ GET       │ /featured   │ Yes     │ List<Charity>  │
+   └──────────────────────────────────────────────────────────────────────────┘
+
+D. HadithController
+   Path: /api/v1/hadiths
+   Responsibilities:
+   - Return a random hadith (for dashboard rotation)
+   - Return hadiths filtered by tag
+   - Return specific hadith by ID
+
+   Methods:
+   ┌──────────────────────────────────────────────────────────────────────────┐
+   │ Method             │ HTTP      │ Path        │ Auth    │ Returns        │
+   ├──────────────────────────────────────────────────────────────────────────┤
+   │ getRandomHadith()  │ GET       │ /random     │ Yes     │ HadithResp     │
+   │ getByTag()         │ GET       │ ?tag=x      │ Yes     │ List<Hadith>   │
+   │ getById()          │ GET       │ /{id}       │ Yes     │ HadithResp     │
+   └──────────────────────────────────────────────────────────────────────────┘
+
+
+2. SERVICES
+================================================================================
+
+A. AuthService
+   Dependencies: UserRepository, JwtService, BCryptPasswordEncoder
+   
+   Methods:
+   - register(RegisterRequest): AuthResponse
+     → Validates email uniqueness
+     → Hashes password with BCrypt
+     → Creates User entity, saves to DB
+     → Generates JWT pair via JwtService
+     → Returns AuthResponse with tokens and user info
+
+   - login(LoginRequest): AuthResponse
+     → Loads user by email (throws 401 if not found)
+     → Verifies password against hash (throws 401 if mismatch)
+     → Generates JWT pair via JwtService
+     → Returns AuthResponse
+
+   - refreshToken(refreshToken: String): AuthResponse
+     → Validates refresh token via JwtService
+     → Extracts user ID from token
+     → Generates new access token
+     → Returns AuthResponse with new access token
+
+B. JwtService
+   Dependencies: JwtConfig (secret, expiry values)
+   
+   Methods:
+   - generateAccessToken(userId: UUID, email: String): String
+     → Creates JWT with 15-minute expiry
+   - generateRefreshToken(userId: UUID): String
+     → Creates JWT with 7-day expiry
+   - validateToken(token: String): Boolean
+     → Checks signature and expiry
+   - extractUserId(token: String): UUID
+     → Parses token and returns subject
+   - extractEmail(token: String): String
+
+C. ZakatService
+   Dependencies: ZakatRecordRepository, NisabConfig
+   
+   Methods:
+   - calculate(request: ZakatCalculationRequest): ZakatCalculationResponse
+     → Computes total_assets = savings + gold_value + silver_value + investments
+     → Computes net_assets = total_assets - debts
+     → Fetches current Nisab threshold (configurable: gold or silver standard)
+       Gold Nisab = 87.48g × current gold price per gram
+       Silver Nisab = 612.36g × current silver price per gram
+     → If net_assets >= nisab_threshold: zakat = net_assets × 0.025 (2.5%)
+     → If net_assets < nisab_threshold: zakat = 0, eligible = false
+     → Returns calculation result with breakdown
+
+   - save(userId: UUID, request: ZakatSaveRequest): ZakatRecordResponse
+     → Creates ZakatRecord entity from request
+     → Associates with user
+     → Checks for duplicate year entry (warn or update)
+     → Persists to DB
+     → Returns saved record
+
+   - getHistory(userId: UUID): List<ZakatRecordResponse>
+     → Queries zakat_records WHERE user_id = userId ORDER BY year DESC
+
+   - getSummary(userId: UUID): ZakatSummaryResponse
+     → Gets current year record (if exists)
+     → Computes total zakat paid across all years
+     → Returns summary with current status and totals
+
+   - deleteRecord(userId: UUID, recordId: UUID): void
+     → Validates record belongs to user
+     → Deletes record
+
+D. CharityService
+   Dependencies: CharityRepository
+   
+   Methods:
+   - listCharities(page: Int, size: Int, category: String?): Page<CharityResponse>
+     → Queries with pagination and optional category filter
+   - getCharity(id: UUID): CharityResponse
+   - getFeaturedCharities(): List<CharityResponse>
+     → Queries WHERE is_featured = true
+
+E. HadithService
+   Dependencies: HadithRepository
+   
+   Methods:
+   - getRandomHadith(): HadithResponse
+     → Uses native query: SELECT * FROM hadiths ORDER BY RANDOM() LIMIT 1
+     → Alternatively, can use daily rotation: hash(date) % count
+   - getByTag(tag: String): List<HadithResponse>
+     → Queries WHERE tags @> ARRAY[tag] (PostgreSQL array contains)
+   - getById(id: UUID): HadithResponse
+
+
+3. DTOs (Data Transfer Objects)
+================================================================================
+
+A. Auth DTOs
+────────────────────────────────────────────────
+
+RegisterRequest:
+  name: String          (required, min 2, max 100)
+  email: String         (required, valid email format)
+  password: String      (required, min 8, must contain uppercase + digit)
+
+LoginRequest:
+  email: String         (required)
+  password: String      (required)
+
+AuthResponse:
+  accessToken: String
+  refreshToken: String
+  user: UserProfileResponse
+
+UserProfileResponse:
+  id: UUID
+  name: String
+  email: String
+  createdAt: LocalDateTime
+
+B. Zakat DTOs
+────────────────────────────────────────────────
+
+ZakatCalculationRequest:
+  savings: BigDecimal         (required, >= 0)
+  goldValueUsd: BigDecimal    (required, >= 0, value of gold owned in USD)
+  silverValueUsd: BigDecimal  (required, >= 0, value of silver owned in USD)
+  investments: BigDecimal     (required, >= 0, stocks/mutual funds/crypto)
+  debts: BigDecimal           (required, >= 0, outstanding debts)
+  currency: String            (default "USD")
+
+ZakatCalculationResponse:
+  totalAssets: BigDecimal
+  totalDebts: BigDecimal
+  netAssets: BigDecimal
+  nisabThreshold: BigDecimal
+  nisabStandard: String       ("GOLD" or "SILVER")
+  isEligible: Boolean         (net_assets >= nisab)
+  zakatAmount: BigDecimal     (2.5% of net_assets, or 0 if not eligible)
+  breakdown:
+    savings: BigDecimal
+    goldValue: BigDecimal
+    silverValue: BigDecimal
+    investments: BigDecimal
+    debts: BigDecimal
+
+ZakatSaveRequest:
+  year: Int                   (required, e.g., 2025)
+  savings: BigDecimal
+  goldValueUsd: BigDecimal
+  silverValueUsd: BigDecimal
+  investments: BigDecimal
+  debts: BigDecimal
+  totalAssets: BigDecimal
+  zakatAmount: BigDecimal
+  isPaid: Boolean             (default false)
+
+ZakatRecordResponse:
+  id: UUID
+  year: Int
+  savings: BigDecimal
+  goldValueUsd: BigDecimal
+  silverValueUsd: BigDecimal
+  investments: BigDecimal
+  debts: BigDecimal
+  totalAssets: BigDecimal
+  zakatAmount: BigDecimal
+  isPaid: Boolean
+  paidAt: LocalDateTime?
+  createdAt: LocalDateTime
+
+ZakatSummaryResponse:
+  currentYear: Int
+  currentYearRecord: ZakatRecordResponse?   (null if not calculated yet)
+  totalZakatPaidAllTime: BigDecimal
+  totalRecords: Int
+  lastCalculationDate: LocalDateTime?
+
+C. Charity DTOs
+────────────────────────────────────────────────
+
+CharityResponse:
+  id: UUID
+  name: String
+  description: String
+  websiteUrl: String
+  logoUrl: String?
+  category: String            ("ZAKAT", "SADAQAH", "EMERGENCY", "EDUCATION")
+  location: String            ("Global", "USA", "UK", etc.)
+  credibilityRating: String   ("HIGH", "MEDIUM")
+  isFeatured: Boolean
+
+D. Hadith DTOs
+────────────────────────────────────────────────
+
+HadithResponse:
+  id: UUID
+  textArabic: String
+  textEnglish: String
+  source: String              (e.g., "Sahih Bukhari", "Sahih Muslim")
+  narrator: String            (e.g., "Abu Hurairah (RA)")
+  tags: List<String>          (["zakat", "charity", "sadaqah"])
+
+
+4. ENTITIES (JPA)
+================================================================================
+
+A. User Entity
+────────────────────────────────────────────────
+
+@Entity
+@Table(name = "users")
+class User(
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    val id: UUID = UUID.randomUUID(),
+    
+    @Column(nullable = false)
+    var name: String,
+    
+    @Column(nullable = false, unique = true)
+    var email: String,
+    
+    @Column(nullable = false)
+    var passwordHash: String,
+    
+    @Column(nullable = false, updatable = false)
+    val createdAt: LocalDateTime = LocalDateTime.now(),
+    
+    @OneToMany(mappedBy = "user", cascade = [CascadeType.ALL], fetch = FetchType.LAZY)
+    val zakatRecords: MutableList<ZakatRecord> = mutableListOf()
+)
+
+B. ZakatRecord Entity
+────────────────────────────────────────────────
+
+@Entity
+@Table(name = "zakat_records",
+       uniqueConstraints = [UniqueConstraint(columnNames = ["user_id", "year"])])
+class ZakatRecord(
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    val id: UUID = UUID.randomUUID(),
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    val user: User,
+    
+    @Column(nullable = false)
+    val year: Int,
+    
+    @Column(nullable = false, precision = 15, scale = 2)
+    val savings: BigDecimal,
+    
+    @Column(name = "gold_value_usd", nullable = false, precision = 15, scale = 2)
+    val goldValueUsd: BigDecimal,
+    
+    @Column(name = "silver_value_usd", nullable = false, precision = 15, scale = 2)
+    val silverValueUsd: BigDecimal,
+    
+    @Column(nullable = false, precision = 15, scale = 2)
+    val investments: BigDecimal,
+    
+    @Column(nullable = false, precision = 15, scale = 2)
+    val debts: BigDecimal,
+    
+    @Column(name = "total_assets", nullable = false, precision = 15, scale = 2)
+    val totalAssets: BigDecimal,
+    
+    @Column(name = "zakat_amount", nullable = false, precision = 15, scale = 2)
+    val zakatAmount: BigDecimal,
+    
+    @Column(name = "is_paid", nullable = false)
+    var isPaid: Boolean = false,
+    
+    @Column(name = "paid_at")
+    var paidAt: LocalDateTime? = null,
+    
+    @Column(name = "created_at", nullable = false, updatable = false)
+    val createdAt: LocalDateTime = LocalDateTime.now()
+)
+
+C. Charity Entity
+────────────────────────────────────────────────
+
+@Entity
+@Table(name = "charities")
+class Charity(
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    val id: UUID = UUID.randomUUID(),
+    
+    @Column(nullable = false)
+    val name: String,
+    
+    @Column(nullable = false, length = 1000)
+    val description: String,
+    
+    @Column(name = "website_url", nullable = false)
+    val websiteUrl: String,
+    
+    @Column(name = "logo_url")
+    val logoUrl: String? = null,
+    
+    @Column(nullable = false)
+    val category: String,                    // ENUM stored as string
+    
+    @Column(nullable = false)
+    val location: String,
+    
+    @Column(name = "credibility_rating", nullable = false)
+    val credibilityRating: String,           // HIGH, MEDIUM
+    
+    @Column(name = "is_featured", nullable = false)
+    val isFeatured: Boolean = false,
+    
+    @Column(name = "created_at", nullable = false, updatable = false)
+    val createdAt: LocalDateTime = LocalDateTime.now()
+)
+
+D. Hadith Entity
+────────────────────────────────────────────────
+
+@Entity
+@Table(name = "hadiths")
+class Hadith(
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    val id: UUID = UUID.randomUUID(),
+    
+    @Column(name = "text_arabic", nullable = false, length = 2000)
+    val textArabic: String,
+    
+    @Column(name = "text_english", nullable = false, length = 2000)
+    val textEnglish: String,
+    
+    @Column(nullable = false)
+    val source: String,
+    
+    @Column(nullable = false)
+    val narrator: String,
+    
+    @Column(columnDefinition = "TEXT[]")     // PostgreSQL text array
+    val tags: Array<String>,
+    
+    @Column(name = "created_at", nullable = false, updatable = false)
+    val createdAt: LocalDateTime = LocalDateTime.now()
+)
+
+
+5. REPOSITORIES
+================================================================================
+
+A. UserRepository
+   interface UserRepository : JpaRepository<User, UUID> {
+       fun findByEmail(email: String): User?
+       fun existsByEmail(email: String): Boolean
+   }
+
+B. ZakatRecordRepository
+   interface ZakatRecordRepository : JpaRepository<ZakatRecord, UUID> {
+       fun findByUserIdOrderByYearDesc(userId: UUID): List<ZakatRecord>
+       fun findByUserIdAndYear(userId: UUID, year: Int): ZakatRecord?
+       fun findFirstByUserIdOrderByCreatedAtDesc(userId: UUID): ZakatRecord?
+       
+       @Query("SELECT COALESCE(SUM(z.zakatAmount), 0) FROM ZakatRecord z 
+               WHERE z.user.id = :userId AND z.isPaid = true")
+       fun sumPaidZakatByUserId(userId: UUID): BigDecimal
+       
+       fun countByUserId(userId: UUID): Int
+   }
+
+C. CharityRepository
+   interface CharityRepository : JpaRepository<Charity, UUID> {
+       fun findByIsFeaturedTrue(): List<Charity>
+       fun findByCategory(category: String, pageable: Pageable): Page<Charity>
+   }
+
+D. HadithRepository
+   interface HadithRepository : JpaRepository<Hadith, UUID> {
+       @Query(value = "SELECT * FROM hadiths ORDER BY RANDOM() LIMIT 1",
+              nativeQuery = true)
+       fun findRandom(): Hadith
+       
+       @Query(value = "SELECT * FROM hadiths WHERE :tag = ANY(tags)",
+              nativeQuery = true)
+       fun findByTag(tag: String): List<Hadith>
+   }
+
+
+================================================================================
+PART B: FRONTEND LOW-LEVEL DESIGN
+================================================================================
+
+1. SCREENS
+================================================================================
+
+A. LoginScreen
+   - Email input field
+   - Password input field (with show/hide toggle)
+   - "Login" button
+   - "Don't have an account? Register" link
+   - Spiritual background pattern / Islamic geometric design
+   - Error message display (inline below fields)
+
+B. RegisterScreen
+   - Name input field
+   - Email input field
+   - Password input field (with strength indicator)
+   - Confirm password field
+   - "Register" button
+   - "Already have an account? Login" link
+
+C. DashboardScreen
+   - Header: "Assalamu Alaikum, {name}" with profile icon
+   - HadithBanner: rotating hadith card (Arabic + English)
+   - ZakatSummaryCard: current year zakat status
+     → Shows: total assets, zakat due, paid status
+     → If not calculated: "Calculate your Zakat" CTA button
+   - QuickActions: "Calculate Zakat" | "View History" buttons
+   - CharitySpotlight: 2-3 featured charities as horizontal scroll cards
+   - Pull-to-refresh to reload dashboard data
+
+D. ZakatCalculatorScreen
+   - Step-by-step form (or single scrollable form):
+     Step 1: Cash & Savings (bank accounts, cash on hand)
+     Step 2: Gold & Silver (weight or value in USD)
+     Step 3: Investments (stocks, mutual funds, crypto)
+     Step 4: Debts (outstanding loans, credit card debt)
+   - "Calculate" button
+   - Result display:
+     → Total assets breakdown
+     → Nisab threshold indicator (green if eligible, gray if not)
+     → Zakat amount due (large, prominent number)
+     → "Save Record" button
+     → "Pay Zakat" → links to charity list
+
+E. ZakatHistoryScreen
+   - List of yearly zakat records (most recent first)
+   - Each card shows: Year, Total Assets, Zakat Amount, Paid status
+   - Tap card to expand: full breakdown of assets
+   - Trend indicator: chart showing zakat amounts over years
+   - Swipe to delete (with confirmation)
+
+F. CharityListScreen
+   - Search bar at top
+   - Category filter chips: All | Zakat | Sadaqah | Emergency | Education
+   - Charity cards with:
+     → Logo, Name, Description (truncated)
+     → Location badge, Credibility badge
+     → "Visit Website" button (opens external browser)
+   - Featured charities pinned at top
+
+
+2. COMPONENT HIERARCHY
+================================================================================
+
+App
+├── AppProvider (AuthContext + ZakatContext)
+│   ├── AppNavigator
+│   │   ├── AuthStack (shown when not authenticated)
+│   │   │   ├── LoginScreen
+│   │   │   │   ├── Header (app logo + tagline)
+│   │   │   │   ├── Input (email)
+│   │   │   │   ├── Input (password)
+│   │   │   │   ├── Button ("Login")
+│   │   │   │   └── LinkText ("Register")
+│   │   │   └── RegisterScreen
+│   │   │       ├── Header
+│   │   │       ├── Input (name)
+│   │   │       ├── Input (email)
+│   │   │       ├── Input (password)
+│   │   │       ├── Input (confirm password)
+│   │   │       └── Button ("Register")
+│   │   │
+│   │   └── MainTabs (shown when authenticated)
+│   │       ├── DashboardScreen
+│   │       │   ├── Header (greeting + profile icon)
+│   │       │   ├── HadithBanner
+│   │       │   │   └── Card (arabic text + english text + source)
+│   │       │   ├── ZakatSummaryCard
+│   │       │   │   ├── AmountDisplay
+│   │       │   │   ├── StatusBadge (paid/unpaid/not calculated)
+│   │       │   │   └── Button ("Calculate" or "View Details")
+│   │       │   ├── QuickActions
+│   │       │   │   ├── Button ("Calculate Zakat")
+│   │       │   │   └── Button ("View History")
+│   │       │   └── CharitySpotlight
+│   │       │       └── HorizontalScroll
+│   │       │           └── CharityCard (×3)
+│   │       │
+│   │       ├── ZakatCalculatorScreen
+│   │       │   ├── AssetInputForm
+│   │       │   │   ├── Input (savings)
+│   │       │   │   ├── Input (gold value)
+│   │       │   │   ├── Input (silver value)
+│   │       │   │   ├── Input (investments)
+│   │       │   │   └── Input (debts)
+│   │       │   ├── NisabIndicator
+│   │       │   ├── Button ("Calculate")
+│   │       │   └── CalculationResult (conditional)
+│   │       │       ├── BreakdownTable
+│   │       │       ├── AmountDisplay (zakat due)
+│   │       │       └── Button ("Save Record")
+│   │       │
+│   │       ├── ZakatHistoryScreen
+│   │       │   ├── EmptyState (if no records)
+│   │       │   └── FlatList
+│   │       │       └── ZakatRecordCard (per year)
+│   │       │           ├── YearBadge
+│   │       │           ├── AmountDisplay
+│   │       │           └── StatusBadge
+│   │       │
+│   │       └── CharityListScreen
+│   │           ├── SearchBar
+│   │           ├── CategoryFilters (horizontal chips)
+│   │           └── FlatList
+│   │               └── CharityCard
+│   │                   ├── Logo
+│   │                   ├── NameAndDescription
+│   │                   ├── CredibilityBadge
+│   │                   └── Button ("Visit Website")
+
+
+3. STATE STRUCTURE
+================================================================================
+
+A. AuthContext State
+────────────────────────────────────────────────
+
+authState = {
+  isAuthenticated: boolean,        // true after successful login
+  isLoading: boolean,              // true during auth API calls
+  user: {                          // null when logged out
+    id: string,
+    name: string,
+    email: string
+  } | null,
+  accessToken: string | null,      // JWT access token (in memory)
+  error: string | null             // auth error message
+}
+
+Actions:
+- LOGIN_START        → { isLoading: true, error: null }
+- LOGIN_SUCCESS      → { isAuthenticated: true, user, accessToken, isLoading: false }
+- LOGIN_FAILURE      → { error: message, isLoading: false }
+- LOGOUT             → reset to initial state
+- TOKEN_REFRESHED    → { accessToken: newToken }
+
+B. ZakatContext State
+────────────────────────────────────────────────
+
+zakatState = {
+  calculation: {                   // current calculation (not saved)
+    isLoading: boolean,
+    result: {
+      totalAssets: number,
+      netAssets: number,
+      nisabThreshold: number,
+      isEligible: boolean,
+      zakatAmount: number,
+      breakdown: { ... }
+    } | null,
+    error: string | null
+  },
+  history: {                       // saved zakat records
+    isLoading: boolean,
+    records: ZakatRecord[],
+    error: string | null
+  },
+  summary: {                       // dashboard summary
+    isLoading: boolean,
+    data: {
+      currentYear: number,
+      currentYearRecord: ZakatRecord | null,
+      totalPaid: number,
+      totalRecords: number
+    } | null,
+    error: string | null
+  }
+}
+
+Actions:
+- CALCULATE_START       → calculation.isLoading = true
+- CALCULATE_SUCCESS     → calculation.result = payload
+- CALCULATE_FAILURE     → calculation.error = message
+- SAVE_RECORD_SUCCESS   → add to history.records, update summary
+- FETCH_HISTORY_START   → history.isLoading = true
+- FETCH_HISTORY_SUCCESS → history.records = payload
+- FETCH_SUMMARY_SUCCESS → summary.data = payload
+- DELETE_RECORD_SUCCESS → remove from history.records
+
+
+4. EXAMPLE API REQUEST / RESPONSE FORMATS
+================================================================================
+
+A. Register
+────────────────────────────────────────────────
+
+Request:
+  POST /api/v1/auth/register
+  Content-Type: application/json
+  
+  {
+    "name": "Ahmed Khan",
+    "email": "ahmed@example.com",
+    "password": "SecurePass123"
+  }
+
+Response (201 Created):
+  {
+    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "user": {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Ahmed Khan",
+      "email": "ahmed@example.com",
+      "createdAt": "2025-06-15T10:30:00"
+    }
+  }
+
+Error Response (409 Conflict):
+  {
+    "status": 409,
+    "error": "Conflict",
+    "message": "Email already registered",
+    "timestamp": "2025-06-15T10:30:00"
+  }
+
+B. Calculate Zakat
+────────────────────────────────────────────────
+
+Request:
+  POST /api/v1/zakat/calculate
+  Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+  Content-Type: application/json
+  
+  {
+    "savings": 25000.00,
+    "goldValueUsd": 5000.00,
+    "silverValueUsd": 500.00,
+    "investments": 10000.00,
+    "debts": 3000.00,
+    "currency": "USD"
+  }
+
+Response (200 OK):
+  {
+    "totalAssets": 40500.00,
+    "totalDebts": 3000.00,
+    "netAssets": 37500.00,
+    "nisabThreshold": 5548.32,
+    "nisabStandard": "GOLD",
+    "isEligible": true,
+    "zakatAmount": 937.50,
+    "breakdown": {
+      "savings": 25000.00,
+      "goldValue": 5000.00,
+      "silverValue": 500.00,
+      "investments": 10000.00,
+      "debts": 3000.00
+    }
+  }
+
+C. Save Zakat Record
+────────────────────────────────────────────────
+
+Request:
+  POST /api/v1/zakat/save
+  Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+  Content-Type: application/json
+  
+  {
+    "year": 2025,
+    "savings": 25000.00,
+    "goldValueUsd": 5000.00,
+    "silverValueUsd": 500.00,
+    "investments": 10000.00,
+    "debts": 3000.00,
+    "totalAssets": 40500.00,
+    "zakatAmount": 937.50,
+    "isPaid": false
+  }
+
+Response (201 Created):
+  {
+    "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+    "year": 2025,
+    "savings": 25000.00,
+    "goldValueUsd": 5000.00,
+    "silverValueUsd": 500.00,
+    "investments": 10000.00,
+    "debts": 3000.00,
+    "totalAssets": 40500.00,
+    "zakatAmount": 937.50,
+    "isPaid": false,
+    "paidAt": null,
+    "createdAt": "2025-06-15T10:35:00"
+  }
+
+D. Get Random Hadith
+────────────────────────────────────────────────
+
+Request:
+  GET /api/v1/hadiths/random
+  Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+
+Response (200 OK):
+  {
+    "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+    "textArabic": "مَا نَقَصَتْ صَدَقَةٌ مِنْ مَالٍ",
+    "textEnglish": "Charity does not decrease wealth.",
+    "source": "Sahih Muslim",
+    "narrator": "Abu Hurairah (RA)",
+    "tags": ["charity", "sadaqah", "wealth"]
+  }
+
+E. List Charities
+────────────────────────────────────────────────
+
+Request:
+  GET /api/v1/charities?page=0&size=10&category=ZAKAT
+  Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+
+Response (200 OK):
+  {
+    "content": [
+      {
+        "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+        "name": "Islamic Relief Worldwide",
+        "description": "A faith-based humanitarian organization...",
+        "websiteUrl": "https://www.islamic-relief.org",
+        "logoUrl": "https://cdn.example.com/logos/islamic-relief.png",
+        "category": "ZAKAT",
+        "location": "Global",
+        "credibilityRating": "HIGH",
+        "isFeatured": true
+      }
+    ],
+    "totalElements": 15,
+    "totalPages": 2,
+    "number": 0,
+    "size": 10
+  }
+
+
+================================================================================
+                       END OF LOW-LEVEL DESIGN
+================================================================================

@@ -1,0 +1,609 @@
+================================================================================
+                       API SPECIFICATION
+        Zakat Calculation & Charity Recommendation App
+================================================================================
+
+Base URL: /api/v1
+Content-Type: application/json
+Authentication: JWT Bearer Token (unless marked PUBLIC)
+
+Standard Error Response Format (all endpoints):
+  {
+    "status": <http_status_code>,
+    "error": "<error_type>",
+    "message": "<human_readable_message>",
+    "timestamp": "2025-06-15T10:30:00",
+    "fieldErrors": [                          // only for validation errors
+      { "field": "email", "message": "must be a valid email" }
+    ]
+  }
+
+
+================================================================================
+1. AUTHENTICATION APIs
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+POST /api/v1/auth/register                                            [PUBLIC]
+────────────────────────────────────────────────────────────────────────────────
+Description: Register a new user account.
+
+Request Body:
+  {
+    "name": "Ahmed Khan",                    // required, 2-100 chars
+    "email": "ahmed@example.com",            // required, valid email
+    "password": "SecurePass123"              // required, min 8 chars,
+  }                                          // must have uppercase + digit
+
+Success Response (201 Created):
+  {
+    "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+    "user": {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Ahmed Khan",
+      "email": "ahmed@example.com",
+      "createdAt": "2025-06-15T10:30:00"
+    }
+  }
+
+Error Responses:
+  400 Bad Request     — validation errors (missing fields, weak password)
+  409 Conflict        — email already registered
+
+
+────────────────────────────────────────────────────────────────────────────────
+POST /api/v1/auth/login                                               [PUBLIC]
+────────────────────────────────────────────────────────────────────────────────
+Description: Authenticate and receive JWT tokens.
+
+Request Body:
+  {
+    "email": "ahmed@example.com",            // required
+    "password": "SecurePass123"              // required
+  }
+
+Success Response (200 OK):
+  {
+    "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+    "user": {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Ahmed Khan",
+      "email": "ahmed@example.com",
+      "createdAt": "2025-06-15T10:30:00"
+    }
+  }
+
+Error Responses:
+  401 Unauthorized    — invalid email or password
+
+
+────────────────────────────────────────────────────────────────────────────────
+POST /api/v1/auth/refresh                                             [PUBLIC]
+────────────────────────────────────────────────────────────────────────────────
+Description: Get a new access token using a valid refresh token.
+
+Request Body:
+  {
+    "refreshToken": "eyJhbGciOiJIUzI1NiIs..."
+  }
+
+Success Response (200 OK):
+  {
+    "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+    "refreshToken": "eyJhbGciOiJIUzI1NiIs...",
+    "user": {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Ahmed Khan",
+      "email": "ahmed@example.com",
+      "createdAt": "2025-06-15T10:30:00"
+    }
+  }
+
+Error Responses:
+  401 Unauthorized    — refresh token expired or invalid
+
+
+────────────────────────────────────────────────────────────────────────────────
+GET /api/v1/auth/profile                                         [AUTHENTICATED]
+────────────────────────────────────────────────────────────────────────────────
+Description: Get the authenticated user's profile.
+
+Headers:
+  Authorization: Bearer <accessToken>
+
+Success Response (200 OK):
+  {
+    "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "name": "Ahmed Khan",
+    "email": "ahmed@example.com",
+    "createdAt": "2025-06-15T10:30:00"
+  }
+
+Error Responses:
+  401 Unauthorized    — missing or invalid token
+
+
+================================================================================
+2. ZAKAT APIs
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+POST /api/v1/zakat/calculate                                     [AUTHENTICATED]
+────────────────────────────────────────────────────────────────────────────────
+Description: Calculate zakat based on provided assets. Does NOT save the record.
+
+Headers:
+  Authorization: Bearer <accessToken>
+
+Request Body:
+  {
+    "savings": 25000.00,                     // required, >= 0
+    "goldValueUsd": 5000.00,                 // required, >= 0
+    "silverValueUsd": 500.00,                // required, >= 0
+    "investments": 10000.00,                 // required, >= 0
+    "debts": 3000.00,                        // required, >= 0
+    "currency": "USD"                        // optional, default "USD"
+  }
+
+Success Response (200 OK):
+  {
+    "totalAssets": 40500.00,
+    "totalDebts": 3000.00,
+    "netAssets": 37500.00,
+    "nisabThreshold": 5548.32,
+    "nisabStandard": "GOLD",
+    "isEligible": true,
+    "zakatAmount": 937.50,
+    "breakdown": {
+      "savings": 25000.00,
+      "goldValue": 5000.00,
+      "silverValue": 500.00,
+      "investments": 10000.00,
+      "debts": 3000.00
+    }
+  }
+
+  // When below Nisab threshold:
+  {
+    "totalAssets": 2000.00,
+    "totalDebts": 500.00,
+    "netAssets": 1500.00,
+    "nisabThreshold": 5548.32,
+    "nisabStandard": "GOLD",
+    "isEligible": false,
+    "zakatAmount": 0.00,
+    "breakdown": { ... }
+  }
+
+Error Responses:
+  400 Bad Request     — negative values or missing fields
+  401 Unauthorized    — invalid token
+
+
+────────────────────────────────────────────────────────────────────────────────
+POST /api/v1/zakat/save                                          [AUTHENTICATED]
+────────────────────────────────────────────────────────────────────────────────
+Description: Save a confirmed zakat calculation as a yearly record.
+
+Headers:
+  Authorization: Bearer <accessToken>
+
+Request Body:
+  {
+    "year": 2025,                            // required, 1400-2100
+    "savings": 25000.00,                     // required
+    "goldValueUsd": 5000.00,                 // required
+    "silverValueUsd": 500.00,                // required
+    "investments": 10000.00,                 // required
+    "debts": 3000.00,                        // required
+    "totalAssets": 40500.00,                 // required
+    "zakatAmount": 937.50,                   // required
+    "isPaid": false                          // optional, default false
+  }
+
+Success Response (201 Created):
+  {
+    "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+    "year": 2025,
+    "savings": 25000.00,
+    "goldValueUsd": 5000.00,
+    "silverValueUsd": 500.00,
+    "investments": 10000.00,
+    "debts": 3000.00,
+    "totalAssets": 40500.00,
+    "zakatAmount": 937.50,
+    "isPaid": false,
+    "paidAt": null,
+    "createdAt": "2025-06-15T10:35:00",
+    "updatedAt": "2025-06-15T10:35:00"
+  }
+
+Error Responses:
+  400 Bad Request     — validation errors
+  401 Unauthorized    — invalid token
+  409 Conflict        — record for this year already exists
+
+
+────────────────────────────────────────────────────────────────────────────────
+GET /api/v1/zakat/history                                        [AUTHENTICATED]
+────────────────────────────────────────────────────────────────────────────────
+Description: Get all zakat records for the authenticated user.
+
+Headers:
+  Authorization: Bearer <accessToken>
+
+Query Parameters:
+  None (returns all records for the user, ordered by year DESC)
+
+Success Response (200 OK):
+  [
+    {
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "year": 2025,
+      "savings": 25000.00,
+      "goldValueUsd": 5000.00,
+      "silverValueUsd": 500.00,
+      "investments": 10000.00,
+      "debts": 3000.00,
+      "totalAssets": 40500.00,
+      "zakatAmount": 937.50,
+      "isPaid": true,
+      "paidAt": "2025-04-10T14:00:00",
+      "createdAt": "2025-06-15T10:35:00",
+      "updatedAt": "2025-06-15T10:35:00"
+    },
+    {
+      "id": "c3d4e5f6-a7b8-9012-cdef-234567890123",
+      "year": 2024,
+      "savings": 20000.00,
+      "goldValueUsd": 3000.00,
+      "silverValueUsd": 200.00,
+      "investments": 8000.00,
+      "debts": 2000.00,
+      "totalAssets": 31200.00,
+      "zakatAmount": 730.00,
+      "isPaid": true,
+      "paidAt": "2024-03-25T12:00:00",
+      "createdAt": "2024-03-20T09:00:00",
+      "updatedAt": "2024-03-25T12:00:00"
+    }
+  ]
+
+Error Responses:
+  401 Unauthorized
+
+
+────────────────────────────────────────────────────────────────────────────────
+GET /api/v1/zakat/summary                                        [AUTHENTICATED]
+────────────────────────────────────────────────────────────────────────────────
+Description: Get a summary of the user's zakat status for the dashboard.
+
+Headers:
+  Authorization: Bearer <accessToken>
+
+Success Response (200 OK):
+  {
+    "currentYear": 2025,
+    "currentYearRecord": {                    // null if not calculated yet
+      "id": "b2c3d4e5-...",
+      "year": 2025,
+      "zakatAmount": 937.50,
+      "isPaid": false,
+      "totalAssets": 40500.00,
+      ...
+    },
+    "totalZakatPaidAllTime": 1667.50,
+    "totalRecords": 2,
+    "lastCalculationDate": "2025-06-15T10:35:00"
+  }
+
+Error Responses:
+  401 Unauthorized
+
+
+────────────────────────────────────────────────────────────────────────────────
+PUT /api/v1/zakat/{id}/pay                                       [AUTHENTICATED]
+────────────────────────────────────────────────────────────────────────────────
+Description: Mark a zakat record as paid.
+
+Headers:
+  Authorization: Bearer <accessToken>
+
+Path Parameters:
+  id — UUID of the zakat record
+
+Request Body: None
+
+Success Response (200 OK):
+  {
+    "id": "b2c3d4e5-...",
+    "year": 2025,
+    "zakatAmount": 937.50,
+    "isPaid": true,
+    "paidAt": "2025-06-20T16:00:00",
+    ...
+  }
+
+Error Responses:
+  401 Unauthorized
+  403 Forbidden       — record belongs to another user
+  404 Not Found       — record does not exist
+
+
+────────────────────────────────────────────────────────────────────────────────
+DELETE /api/v1/zakat/{id}                                        [AUTHENTICATED]
+────────────────────────────────────────────────────────────────────────────────
+Description: Delete a zakat record.
+
+Headers:
+  Authorization: Bearer <accessToken>
+
+Path Parameters:
+  id — UUID of the zakat record
+
+Success Response (204 No Content):
+  (empty body)
+
+Error Responses:
+  401 Unauthorized
+  403 Forbidden       — record belongs to another user
+  404 Not Found       — record does not exist
+
+
+================================================================================
+3. CHARITY APIs
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+GET /api/v1/charities                                            [AUTHENTICATED]
+────────────────────────────────────────────────────────────────────────────────
+Description: List all charities with optional filtering and pagination.
+
+Headers:
+  Authorization: Bearer <accessToken>
+
+Query Parameters:
+  page     — int, default 0 (zero-indexed page number)
+  size     — int, default 10 (items per page, max 50)
+  category — string, optional (ZAKAT, SADAQAH, EMERGENCY, EDUCATION, HEALTHCARE)
+
+Success Response (200 OK):
+  {
+    "content": [
+      {
+        "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+        "name": "Islamic Relief Worldwide",
+        "description": "Faith-inspired humanitarian organization...",
+        "websiteUrl": "https://www.islamic-relief.org",
+        "logoUrl": "https://cdn.example.com/logos/islamic-relief.png",
+        "category": "ZAKAT",
+        "location": "Global",
+        "credibilityRating": "HIGH",
+        "isFeatured": true
+      },
+      {
+        "id": "e5f6a7b8-c9d0-1234-efab-345678901234",
+        "name": "Zakat Foundation of America",
+        "description": "US-based nonprofit facilitating zakat...",
+        "websiteUrl": "https://www.zakat.org",
+        "logoUrl": null,
+        "category": "ZAKAT",
+        "location": "USA",
+        "credibilityRating": "HIGH",
+        "isFeatured": true
+      }
+    ],
+    "totalElements": 15,
+    "totalPages": 2,
+    "number": 0,
+    "size": 10,
+    "first": true,
+    "last": false
+  }
+
+Error Responses:
+  401 Unauthorized
+
+
+────────────────────────────────────────────────────────────────────────────────
+GET /api/v1/charities/featured                                   [AUTHENTICATED]
+────────────────────────────────────────────────────────────────────────────────
+Description: Get all featured/recommended charities (for dashboard spotlight).
+
+Headers:
+  Authorization: Bearer <accessToken>
+
+Success Response (200 OK):
+  [
+    {
+      "id": "d4e5f6a7-...",
+      "name": "Islamic Relief Worldwide",
+      "description": "Faith-inspired humanitarian organization...",
+      "websiteUrl": "https://www.islamic-relief.org",
+      "logoUrl": "https://cdn.example.com/logos/islamic-relief.png",
+      "category": "ZAKAT",
+      "location": "Global",
+      "credibilityRating": "HIGH",
+      "isFeatured": true
+    }
+  ]
+
+Error Responses:
+  401 Unauthorized
+
+
+────────────────────────────────────────────────────────────────────────────────
+GET /api/v1/charities/{id}                                       [AUTHENTICATED]
+────────────────────────────────────────────────────────────────────────────────
+Description: Get detailed information about a specific charity.
+
+Headers:
+  Authorization: Bearer <accessToken>
+
+Path Parameters:
+  id — UUID of the charity
+
+Success Response (200 OK):
+  {
+    "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+    "name": "Islamic Relief Worldwide",
+    "description": "Faith-inspired humanitarian organization providing aid in over 40 countries including emergency relief, food security, water & sanitation, healthcare, education, and orphan sponsorship programs.",
+    "websiteUrl": "https://www.islamic-relief.org",
+    "logoUrl": "https://cdn.example.com/logos/islamic-relief.png",
+    "category": "ZAKAT",
+    "location": "Global",
+    "credibilityRating": "HIGH",
+    "isFeatured": true
+  }
+
+Error Responses:
+  401 Unauthorized
+  404 Not Found
+
+
+================================================================================
+4. HADITH APIs
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+GET /api/v1/hadiths/random                                       [AUTHENTICATED]
+────────────────────────────────────────────────────────────────────────────────
+Description: Get a random hadith for the dashboard banner.
+
+Headers:
+  Authorization: Bearer <accessToken>
+
+Success Response (200 OK):
+  {
+    "id": "f6a7b8c9-d0e1-2345-fabf-456789012345",
+    "textArabic": "مَا نَقَصَتْ صَدَقَةٌ مِنْ مَالٍ",
+    "textEnglish": "Charity does not decrease wealth.",
+    "source": "Sahih Muslim",
+    "narrator": "Abu Hurairah (RA)",
+    "tags": ["charity", "sadaqah", "wealth"]
+  }
+
+Error Responses:
+  401 Unauthorized
+  404 Not Found       — no hadiths in database
+
+
+────────────────────────────────────────────────────────────────────────────────
+GET /api/v1/hadiths?tag={tag}                                    [AUTHENTICATED]
+────────────────────────────────────────────────────────────────────────────────
+Description: Get hadiths filtered by a specific tag.
+
+Headers:
+  Authorization: Bearer <accessToken>
+
+Query Parameters:
+  tag — string, required (e.g., "zakat", "charity", "sadaqah")
+
+Success Response (200 OK):
+  [
+    {
+      "id": "f6a7b8c9-...",
+      "textArabic": "...",
+      "textEnglish": "Charity does not decrease wealth.",
+      "source": "Sahih Muslim",
+      "narrator": "Abu Hurairah (RA)",
+      "tags": ["charity", "sadaqah", "wealth"]
+    },
+    {
+      "id": "a7b8c9d0-...",
+      "textArabic": "...",
+      "textEnglish": "Protect yourselves from the Fire even if with half a date.",
+      "source": "Sahih Bukhari",
+      "narrator": "Adi ibn Hatim (RA)",
+      "tags": ["charity", "sadaqah", "fire"]
+    }
+  ]
+
+Error Responses:
+  400 Bad Request     — missing tag parameter
+  401 Unauthorized
+
+
+────────────────────────────────────────────────────────────────────────────────
+GET /api/v1/hadiths/{id}                                         [AUTHENTICATED]
+────────────────────────────────────────────────────────────────────────────────
+Description: Get a specific hadith by ID.
+
+Headers:
+  Authorization: Bearer <accessToken>
+
+Path Parameters:
+  id — UUID of the hadith
+
+Success Response (200 OK):
+  {
+    "id": "f6a7b8c9-d0e1-2345-fabf-456789012345",
+    "textArabic": "مَا نَقَصَتْ صَدَقَةٌ مِنْ مَالٍ",
+    "textEnglish": "Charity does not decrease wealth.",
+    "source": "Sahih Muslim",
+    "narrator": "Abu Hurairah (RA)",
+    "tags": ["charity", "sadaqah", "wealth"]
+  }
+
+Error Responses:
+  401 Unauthorized
+  404 Not Found
+
+
+================================================================================
+5. API SUMMARY TABLE
+================================================================================
+
+┌──────────┬──────────────────────────────┬───────┬──────────────────────────┐
+│ Method   │ Endpoint                     │ Auth  │ Description              │
+├──────────┼──────────────────────────────┼───────┼──────────────────────────┤
+│          │       AUTHENTICATION         │       │                          │
+│ POST     │ /api/v1/auth/register        │ No    │ Register new user        │
+│ POST     │ /api/v1/auth/login           │ No    │ Login, get tokens        │
+│ POST     │ /api/v1/auth/refresh         │ No    │ Refresh access token     │
+│ GET      │ /api/v1/auth/profile         │ Yes   │ Get user profile         │
+├──────────┼──────────────────────────────┼───────┼──────────────────────────┤
+│          │           ZAKAT              │       │                          │
+│ POST     │ /api/v1/zakat/calculate      │ Yes   │ Calculate zakat          │
+│ POST     │ /api/v1/zakat/save           │ Yes   │ Save zakat record        │
+│ GET      │ /api/v1/zakat/history        │ Yes   │ Get all records          │
+│ GET      │ /api/v1/zakat/summary        │ Yes   │ Get dashboard summary    │
+│ PUT      │ /api/v1/zakat/{id}/pay       │ Yes   │ Mark as paid             │
+│ DELETE   │ /api/v1/zakat/{id}           │ Yes   │ Delete a record          │
+├──────────┼──────────────────────────────┼───────┼──────────────────────────┤
+│          │         CHARITIES            │       │                          │
+│ GET      │ /api/v1/charities            │ Yes   │ List charities (paged)   │
+│ GET      │ /api/v1/charities/featured   │ Yes   │ Get featured charities   │
+│ GET      │ /api/v1/charities/{id}       │ Yes   │ Get charity details      │
+├──────────┼──────────────────────────────┼───────┼──────────────────────────┤
+│          │          HADITHS             │       │                          │
+│ GET      │ /api/v1/hadiths/random       │ Yes   │ Get random hadith        │
+│ GET      │ /api/v1/hadiths?tag={tag}    │ Yes   │ Get hadiths by tag       │
+│ GET      │ /api/v1/hadiths/{id}         │ Yes   │ Get hadith by ID         │
+└──────────┴──────────────────────────────┴───────┴──────────────────────────┘
+
+Total Endpoints: 16
+Public Endpoints: 3 (register, login, refresh)
+Authenticated Endpoints: 13
+
+
+================================================================================
+6. HTTP STATUS CODES USED
+================================================================================
+
+200 OK              — Successful GET, PUT
+201 Created         — Successful POST (register, save record)
+204 No Content      — Successful DELETE
+400 Bad Request     — Validation errors, malformed request
+401 Unauthorized    — Missing/invalid/expired JWT token
+403 Forbidden       — Access to another user's resource
+404 Not Found       — Resource does not exist
+409 Conflict        — Duplicate resource (email, year record)
+500 Internal Error  — Unexpected server error
+
+
+================================================================================
+                        END OF API SPECIFICATION
+================================================================================
